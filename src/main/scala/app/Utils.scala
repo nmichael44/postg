@@ -1,9 +1,11 @@
 package app
 
+import cats.data.NonEmptyVector
 import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 
 import java.nio.file.Paths
+import scala.collection.View
 import scala.io.Source
 
 object Utils:
@@ -50,7 +52,6 @@ object Utils:
       parseKey(configMap, PasswordKey, Some.apply, _.nonEmpty)
 
     for {
-      //configMap <- toFlatMapOps(toFunctorOps(toTraverseOps(augmentString(config).linesIterator.toVector).traverse(parseLine[F])).map(_.toMap))
       configMap <- config.linesIterator.toVector.traverse(parseLine[F]).map(_.toMap)
       host <- parseHost(configMap)
       port <- parsePort(configMap)
@@ -63,3 +64,8 @@ object Utils:
       .fromAutoCloseable(Async[F].blocking(Source.fromFile(Paths.get(path).toFile)))
       .evalMap(source => Async[F].blocking(source.mkString))
       .evalMap(parseDatabaseConfig[F])
+
+  // We can't make this a value class because NonEmptyVector already is one.
+  implicit class ToView[A](nev: NonEmptyVector[A]) {
+    def view: View[A] = nev.toVector.view
+  }
