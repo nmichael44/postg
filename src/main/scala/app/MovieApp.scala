@@ -1,7 +1,6 @@
 package app
 
-import app.MovieDbModel.DirectorPath
-import cats.data.NonEmptyList
+import cats.data.{NonEmptyList, NonEmptyVector}
 import cats.effect.{Async, ExitCode, IO, MonadCancelThrow, Resource}
 import cats.effect.implicits.parallelForGenSpawn
 import cats.syntax.all.*
@@ -11,6 +10,8 @@ import java.nio.file.Paths
 import scala.annotation.unused
 import scala.concurrent.duration.*
 import scala.io.Source
+
+import app.MovieDbModel.DirectorPath
 import com.comcast.ip4s.{ipv4, port}
 import doobie.implicits.*
 import doobie.postgres.implicits.*
@@ -51,7 +52,7 @@ object MovieApp:
 
   private def getDirectorsDetailsByName[F[_]: { MonadCancelThrow, Logger }](
       req: Request[F],
-      xa: Transactor[F],
+      mr: MovieRepository[F],
       directorPath: DirectorPath,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
@@ -60,25 +61,26 @@ object MovieApp:
     ensureOnlyAllowedParams(allowedParamsForGetDirectors, dsl, req)
       .getOrElse {
         for {
-          directorsDetails <- getDirectorsDetailsFromDb(xa, directorPath)
+          directorsDetails <- mr.getDirectorsDetails(directorPath.firstName, directorPath.lastName)
           _ <- Logger[F].info("Fetching directors details")
           response <- Ok(directorsDetails.asJson): F[Response[F]]
         } yield response
       }
 
   private def getDirectorDetails[F[_]: { MonadCancelThrow, Logger }](
-      xa: Transactor[F],
+      mr: MovieRepository[F],
       directorId: Long,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
     for {
-      directorDetailsOpt <- getDirectorDetailsFromDb(xa, directorId)
+      directorDetailsMap <- mr.getDirectorDetails(NonEmptyVector.one(directorId))
       _ <- Logger[F].info("Fetching director details")
-      response <- directorDetailsOpt.fold(BadRequest(s"Director id: '$directorId' not found!")) {
-        directorDetails => Ok(directorDetails.asJson)
-      }
+      response <- directorDetailsMap
+        .get(directorId)
+        .map(directorDetails => Ok(directorDetails.asJson))
+        .getOrElse(BadRequest(s"Director id: '$directorId' not found!"))
     } yield response
 
   private def getActorDetailsFromDb[F[_]: MonadCancelThrow](
@@ -91,18 +93,19 @@ object MovieApp:
       .transact(xa)
 
   private def getActorDetails[F[_]: { MonadCancelThrow, Logger }](
-      xa: Transactor[F],
+      mr: MovieRepository[F],
       actorId: Long,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
     for {
-      actorDetailsOpt <- getActorDetailsFromDb(xa, actorId)
+      actorDetailsMap <- mr.getActorDetails(NonEmptyVector.one(actorId))
       _ <- Logger[F].info(s"Fetching actor details for ID: $actorId")
-      response <- actorDetailsOpt.fold(BadRequest(s"Actor id: '$actorId' not found!")) {
-        actorDetails => Ok(actorDetails.asJson)
-      }
+      response <- actorDetailsMap
+        .get(actorId)
+        .map(actorDetails => Ok(actorDetails.asJson))
+        .getOrElse(BadRequest(s"Actor id: '$actorId' not found!"))
     } yield response
 
   private val firstNameParam: String = "firstName"
@@ -127,132 +130,24 @@ object MovieApp:
       extends QueryParamDecoderMatcher[String]("fileName2")
 
   private def getMoviesByDirectorIdFromDb[F[_]: MonadCancelThrow](
-      xa: Transactor[F],
+      mr: MovieRepository[F],
       directorId: Long,
-  ): F[Vector[MovieDbModel.Movie]] =
-    sql"""SELECT m.movieId, m.title, m.year
-          FROM movies m
-          JOIN movieDirector md ON m.movieId = md.movieId
-          WHERE md.directorId = $directorId
-       """
-      .query[MovieDbModel.Movie]
-      .to[Vector]
-      .transact(xa)
+  ): F[Seq[MovieDbModel.Movie]] =
+    mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
+      .map(m => m.getOrElse(directorId, Seq.empty))
 
   private def getMoviesByDirectorId[F[_]: { MonadCancelThrow, Logger }](
-      xa: Transactor[F],
+      mr: MovieRepository[F],
       directorId: Long,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
     for {
-      movies <- getMoviesByDirectorIdFromDb(xa, directorId)
+      moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
       _ <- Logger[F].info(s"Fetching movies for director ID: $directorId")
-      response <- Ok(movies.asJson)
+      response <- Ok(moviesMap.getOrElse(directorId, Seq.empty).asJson)
     } yield response
-
-  private def getMoviesByDirectorNameFromDb[F[_] : MonadCancelThrow](
-                                                                       xa: Transactor[F],
-                                                                       directorPath: DirectorPath,
-                                                                     ): F[String] =
-    val DirectorPath(firstName, lastName) = directorPath
-    for {
-      directors <- getDirectorsDetailsFromDb()
-    }
-
-    def createQueryForMovies(directorIds: NonEmptyList[Long]) =
-      sql"""select md.directorId, m.movieId, m.title, m.year from movies m, movieDirector md
-            where
-              md.movieId = m.movieId and
-         """ ++ in(fr"md.directorId", directorIds)
-      
-    val DirectorPath(firstName, lastName) = directorPath
-
-    val queryForDirectors =
-      sql"""select directorId, firstName, lastName, dob from directors
-            where
-             ($firstName is null or d.firstName = $firstName) and
-             ($lastName is null or d.lastName = $lastName
-           """
-      for {
-        directors <- queryForDirectors.query[MovieDbModel.Director].to[Vector].tra
-      }
-      sql"""select coalesce(xx, '[]'::json) from (SELECT json_agg(json_build_object(
-       'directorId', d.directorId,
-       'firstName', d.firstName,
-       'lastName', d.lastName,
-       'dob', d.dob,
-       'movies', coalesce((
-         SELECT json_agg(json_build_object(
-           'movieId', m.movieId,
-           'title', m.title,
-           'year', m.year
-         ))
-         FROM movies m
-         JOIN movieDirector md ON m.movieId = md.movieId
-         WHERE md.directorId = d.directorId
-       ), '[]'::json)
-     )) xx
-     FROM directors d
-     where ($firstName is null or d.firstName = $firstName) and ($lastName is null or d.lastName = $lastName)) zz
-     """
-
-    query
-      .query[String]
-      .unique
-      .transact(xa)
-
-  // Done as an experiment: Have the db build the final json answer...
-  private def getMoviesByDirectorNameFromDb2[F[_] : MonadCancelThrow](
-                                                                       xa: Transactor[F],
-                                                                       directorPath: DirectorPath,
-                                                                     ): F[String] =
-    val DirectorPath(firstName, lastName) = directorPath
-
-    val query =
-      sql"""select coalesce(xx, '[]'::json) from (SELECT json_agg(json_build_object(
-       'directorId', d.directorId,
-       'firstName', d.firstName,
-       'lastName', d.lastName,
-       'dob', d.dob,
-       'movies', coalesce((
-         SELECT json_agg(json_build_object(
-           'movieId', m.movieId,
-           'title', m.title,
-           'year', m.year
-         ))
-         FROM movies m
-         JOIN movieDirector md ON m.movieId = md.movieId
-         WHERE md.directorId = d.directorId
-       ), '[]'::json)
-     )) xx
-     FROM directors d
-     where ($firstName is null or d.firstName = $firstName) and ($lastName is null or d.lastName = $lastName)) zz
-     """
-
-    query
-      .query[String]
-      .unique
-      .transact(xa)
-
-  private def getMoviesByDirectorName[F[_]: { MonadCancelThrow, Logger }](
-      req: Request[F],
-      xa: Transactor[F],
-      directorPath: DirectorPath,
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
-    val r = ensureOnlyAllowedParams(allowedParamsForGetDirectors, dsl, req)
-    r.getOrElse {
-      for {
-        _ <- Logger[F].info(s"Fetching movies per director by name: $directorPath")
-        moviesPerDirector <- getMoviesByDirectorNameFromDb(xa, directorPath)
-        _ <- Logger[F].info(s"Movies fetched: $moviesPerDirector")
-        response <- Ok(moviesPerDirector)
-      } yield response
-    }
 
   private def getContentOfFileName[F[_]: { Async, Logger }](
       fileName: String,
@@ -318,7 +213,7 @@ object MovieApp:
     } yield res
 
   private def allRoutes[F[_]: { Async, Logger }](
-      xa: Transactor[F],
+      mr: MovieRepository[F],
       dsl: Http4sDsl[F],
   ): HttpRoutes[F] =
     import dsl.*
@@ -327,17 +222,13 @@ object MovieApp:
       case req @ GET -> Root / "getDirectorsByName" :? firstNameOptionalQueryParamDecoderMatcher(
             firstName,
           ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>
-        getDirectorsDetailsByName(req, xa, DirectorPath(firstName, lastName), dsl)
+        getDirectorsDetailsByName(req, mr, DirectorPath(firstName, lastName), dsl)
       case GET -> Root / "getDirector" / LongVar(directorId) =>
-        getDirectorDetails(xa, directorId, dsl)
+        getDirectorDetails(mr, directorId, dsl)
       case GET -> Root / "getActor" / LongVar(actorId) =>
-        getActorDetails(xa, actorId, dsl)
+        getActorDetails(mr, actorId, dsl)
       case GET -> Root / "getMoviesByDirector" / LongVar(directorId) =>
-        getMoviesByDirectorId(xa, directorId, dsl)
-      case req @ GET -> Root / "getMoviesByDirectorName" :? firstNameOptionalQueryParamDecoderMatcher(
-            firstName,
-          ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>
-        getMoviesByDirectorName(req, xa, DirectorPath(firstName, lastName), dsl)
+        getMoviesByDirectorId(mr, directorId, dsl)
       case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
         getContentOfFileName(fileName, dsl)
       case GET -> Root / "getFileExplicit" :? fileNameQueryParamDecoderMatcher(fileName) =>
@@ -349,10 +240,10 @@ object MovieApp:
     }
 
   private def allRoutesComplete[F[_]: { Async, Logger }](
-      xa: Transactor[F],
+      mr: MovieRepository[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
-    allRoutes[F](xa, dsl).orNotFound
+    allRoutes[F](mr, dsl).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
       allowedParams: Set[String],
@@ -380,13 +271,15 @@ object MovieApp:
         DoobieObj
           .xaResource(config)
           .use { (xa: Transactor[F]) =>
+            val movieRepository: MovieRepository[F] = MovieRepositoryDb.create(xa)
+
             Slf4jLogger.create[IO].flatMap { implicit logger =>
               EmberServerBuilder
                 .default[IO]
                 .withHost(ipv4"0.0.0.0")
                 .withPort(port"8080")
                 .withShutdownTimeout(10.seconds)
-                .withHttpApp(allRoutesComplete[F](xa, dsl))
+                .withHttpApp(allRoutesComplete[F](movieRepository, dsl))
                 .build
                 .use(_ => Logger[F].info("Server started!") *> Async[F].never)
                 .as(ExitCode.Success)

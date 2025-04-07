@@ -3,19 +3,15 @@ package app
 import java.time.LocalDate
 
 object MovieDbModel:
-  private type ActorId = Long
-  private type MovieId = Long
-  private type DirectorId = Long
-
   final case class DirectorPath(firstName: Option[String], lastName: Option[String]):
     override def toString: String =
       s"{ firstName = ${firstName.getOrElse("None")}, lastName = ${lastName.getOrElse("None")} }"
 
-  final case class Actor(actorId: ActorId, firstName: String, lastName: String, dob: LocalDate):
+  final case class Actor(actorId: Long, firstName: String, lastName: String, dob: LocalDate):
     override def toString: String = s"Actor($firstName $lastName)"
 
   final case class Director(
-      directorId: DirectorId,
+      directorId: Long,
       firstName: String,
       lastName: String,
       dob: LocalDate,
@@ -23,7 +19,7 @@ object MovieDbModel:
     override def toString: String = s"Director($firstName $lastName)"
 
   final case class Movie(
-      movieId: MovieId,
+      movieId: Long,
       title: String,
       year: Int,
   ):
