@@ -55,8 +55,7 @@ final class MovieRepositoryDb[F[_]: Async](xa: Transactor[F]) extends MovieRepos
     sql"""SELECT md.directorId, m.movieId, m.title, m.year
             FROM movies m
             JOIN movieDirector md ON m.movieId = md.movieId
-            WHERE md.directorId = ANY($directorIdsVec)
-         """
+            WHERE md.directorId = ANY($directorIdsVec)"""
       .query[(Long, Long, String, Int)]
       .stream
       .fold(e) { case (m, (directorId, movieId, title, year)) =>
