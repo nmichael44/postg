@@ -1,7 +1,7 @@
 package app
 
 import cats.data.{NonEmptyList, NonEmptyVector}
-import cats.effect.{Async, ExitCode, IO, MonadCancelThrow, Resource}
+import cats.effect.{Async, Concurrent, ExitCode, IO, MonadCancelThrow, Resource}
 import cats.effect.implicits.parallelForGenSpawn
 import cats.syntax.all.*
 import cats.syntax.parallel.*
@@ -12,7 +12,8 @@ import scala.concurrent.duration.*
 import scala.io.Source
 
 import app.MovieDbModel.DirectorPath
-import com.comcast.ip4s.{ipv4, port}
+import app.Utils.DatabaseConfig
+import com.comcast.ip4s.{Ipv4Address, Port}
 import doobie.implicits.*
 import doobie.postgres.implicits.*
 import doobie.util.fragments.in
@@ -22,10 +23,14 @@ import io.circe.generic.auto.*
 import io.circe.syntax.*
 import org.http4s.*
 import org.http4s.circe.*
+import org.http4s.client.middleware.FollowRedirect
+import org.http4s.client.Client
 import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
 import org.http4s.dsl.io.*
 import org.http4s.dsl.Http4sDsl
+import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
+import org.http4s.implicits.*
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
 
@@ -212,8 +217,21 @@ object MovieApp:
       )
     } yield res
 
+  private def fetchCompanyData[F[_]: { Async }](
+      companyName: String,
+      apiClient: ExternalApiClient[F],
+      dsl: Http4sDsl[F],
+  ): F[Response[F]] =
+    import dsl.*
+
+    for {
+      data <- apiClient.fetchCompanyData(companyName)
+      res <- Ok(data)
+    } yield res
+
   private def allRoutes[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
+      apiClient: ExternalApiClient[F],
       dsl: Http4sDsl[F],
   ): HttpRoutes[F] =
     import dsl.*
@@ -237,13 +255,16 @@ object MovieApp:
             fileName1,
           ) +& fileName2QueryParamDecoderMatcher(fileName2) =>
         readTwoFilesInParallel(fileName1, fileName2, dsl)
+      case GET -> Root / "fetchCompanyData" / companyName =>
+        fetchCompanyData(companyName, apiClient, dsl)
     }
 
   private def allRoutesComplete[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
+      apiClient: ExternalApiClient[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
-    allRoutes[F](mr, dsl).orNotFound
+    allRoutes[F](mr, apiClient, dsl).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
       allowedParams: Set[String],
@@ -258,6 +279,16 @@ object MovieApp:
       BadRequest(s"Extra params found in quest: ${extraParams.mkString(", ")}."),
     )
 
+  private def getServerHostIPPort(config: DatabaseConfig): (Ipv4Address, Port) =
+    (Ipv4Address.fromString(config.serverHostIP), Port.fromInt(config.serverHostPort)) match {
+      case (Some(ipv4Address), Some(port)) => (ipv4Address, port)
+      case (None, _) => throw new AssertionError(s"Illegal ServerHostIP: '${config.serverHostIP}'.")
+      case (_, None) =>
+        throw new AssertionError(s"Illegal ServerHostPort: '${config.serverHostPort}'.")
+    }
+
+  private final val MaxRedirects: Int = 5
+
   // Example call:
   // http://127.0.0.1:8080/getDirector/2
   def run(@unused args: List[String]): IO[ExitCode] =
@@ -268,21 +299,29 @@ object MovieApp:
     Utils
       .readDbConfig[F]("Config.cfg")
       .use(config =>
-        DoobieObj
-          .xaResource(config)
-          .use { (xa: Transactor[F]) =>
-            val movieRepository: MovieRepository[F] = MovieRepositoryDb.create(xa)
+        EmberClientBuilder
+          .default[F]
+          .build
+          .map(client => FollowRedirect[F](MaxRedirects)(client))
+          .use { httpClient =>
+            val externalApiClient = ExternalApiClientImpl.create[F](httpClient)
+            DoobieObj
+              .xaResource(config)
+              .use { (xa: Transactor[F]) =>
+                val movieRepository: MovieRepository[F] = MovieRepositoryDb.create(xa)
+                val (serverHostIP, serverHostPort) = getServerHostIPPort(config)
 
-            Slf4jLogger.create[IO].flatMap { implicit logger =>
-              EmberServerBuilder
-                .default[IO]
-                .withHost(ipv4"0.0.0.0")
-                .withPort(port"8080")
-                .withShutdownTimeout(10.seconds)
-                .withHttpApp(allRoutesComplete[F](movieRepository, dsl))
-                .build
-                .use(_ => Logger[F].info("Server started!") *> Async[F].never)
-                .as(ExitCode.Success)
-            }
+                Slf4jLogger.create[IO].flatMap { implicit logger =>
+                  EmberServerBuilder
+                    .default[IO]
+                    .withHost(serverHostIP)
+                    .withPort(serverHostPort)
+                    .withShutdownTimeout(10.seconds)
+                    .withHttpApp(allRoutesComplete[F](movieRepository, externalApiClient, dsl))
+                    .build
+                    .use(_ => Logger[F].info("Server started!") *> Async[F].never)
+                    .as(ExitCode.Success)
+                }
+              }
           },
       )
