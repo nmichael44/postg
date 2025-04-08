@@ -1,7 +1,7 @@
 package app
 
-import cats.data.{NonEmptyList, NonEmptyVector}
-import cats.effect.{Async, Concurrent, ExitCode, IO, MonadCancelThrow, Resource}
+import cats.data.NonEmptyVector
+import cats.effect.{Async, ExitCode, IO, MonadCancelThrow, Resource}
 import cats.effect.implicits.parallelForGenSpawn
 import cats.syntax.all.*
 import cats.syntax.parallel.*
@@ -14,9 +14,6 @@ import scala.io.Source
 import app.MovieDbModel.DirectorPath
 import app.Utils.DatabaseConfig
 import com.comcast.ip4s.{Ipv4Address, Port}
-import doobie.implicits.*
-import doobie.postgres.implicits.*
-import doobie.util.fragments.in
 import doobie.util.transactor.Transactor
 import io.circe.*
 import io.circe.generic.auto.*
@@ -24,7 +21,6 @@ import io.circe.syntax.*
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.client.middleware.FollowRedirect
-import org.http4s.client.Client
 import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
 import org.http4s.dsl.io.*
 import org.http4s.dsl.Http4sDsl
@@ -35,26 +31,6 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
 
 object MovieApp:
-  private def getDirectorsDetailsFromDb[F[_]: MonadCancelThrow](
-      xa: Transactor[F],
-      directorPath: DirectorPath,
-  ): F[Vector[MovieDbModel.Director]] =
-    val DirectorPath(firstName, lastName) = directorPath
-
-    sql"select directorId, firstName, lastName, dob from t where ($firstName is null or firstName = $firstName) and ($lastName is null or lastName = $lastName)"
-      .query[MovieDbModel.Director]
-      .to[Vector]
-      .transact(xa)
-
-  private def getDirectorDetailsFromDb[F[_]: MonadCancelThrow](
-      xa: Transactor[F],
-      directorId: Long,
-  ): F[Option[MovieDbModel.Director]] =
-    sql"select directorId, firstName, lastName, dob from t where directorId = $directorId"
-      .query[MovieDbModel.Director]
-      .option
-      .transact(xa)
-
   private def getDirectorsDetailsByName[F[_]: { MonadCancelThrow, Logger }](
       req: Request[F],
       mr: MovieRepository[F],
@@ -87,15 +63,6 @@ object MovieApp:
         .map(directorDetails => Ok(directorDetails.asJson))
         .getOrElse(BadRequest(s"Director id: '$directorId' not found!"))
     } yield response
-
-  private def getActorDetailsFromDb[F[_]: MonadCancelThrow](
-      xa: Transactor[F],
-      actorId: Long,
-  ): F[Option[MovieDbModel.Actor]] =
-    sql"SELECT actorId, firstName, lastName, dob FROM actors WHERE actorId = $actorId"
-      .query[MovieDbModel.Actor]
-      .option
-      .transact(xa)
 
   private def getActorDetails[F[_]: { MonadCancelThrow, Logger }](
       mr: MovieRepository[F],

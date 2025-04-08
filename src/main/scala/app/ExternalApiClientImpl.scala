@@ -1,6 +1,7 @@
 package app
 
 import cats.effect.Async
+
 import org.http4s.{Method, Request, Uri}
 import org.http4s.client.Client
 
