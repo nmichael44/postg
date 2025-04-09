@@ -26,7 +26,7 @@ final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepository[F]:
     1L -> 1L,
   )
 
-  def getDirectorsDetails(
+  override def getDirectorsDetails(
       firstName: Option[String],
       lastName: Option[String],
   ): F[Seq[MovieDbModel.Director]] =
@@ -36,17 +36,19 @@ final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepository[F]:
       }.toVector,
     )
 
-  def getDirectorDetails(directorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Director]] =
+  override def getDirectorDetails(
+      directorIds: NonEmptyVector[Long],
+  ): F[Map[Long, MovieDbModel.Director]] =
     Async[F].delay {
       directorIds.toVector.view.flatMap(id => Directors.get(id).map(e => (id, e))).toMap
     }
 
-  def getActorDetails(actorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Actor]] =
+  override def getActorDetails(actorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Actor]] =
     Async[F].delay {
       actorIds.toVector.view.flatMap(id => Actors.get(id).map(e => (id, e))).toMap
     }
 
-  def getMoviesByDirectorId(
+  override def getMoviesByDirectorId(
       directorIds: NonEmptyVector[Long],
   ): F[Map[Long, Seq[MovieDbModel.Movie]]] =
     Async[F].delay {
@@ -56,4 +58,14 @@ final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepository[F]:
         }
         .toVector
         .groupMap(_._2)(p => Movies(p._1))
+    }
+
+  override def getMoviesByIds(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]] =
+    Async[F].delay {
+      val vs = for {
+        movieId <- movieIds.toVector
+        movie <- Movies.get(movieId)
+      } yield (movieId, movie)
+
+      vs.toMap
     }

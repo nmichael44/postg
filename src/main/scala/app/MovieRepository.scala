@@ -16,3 +16,5 @@ trait MovieRepository[F[_]]:
   def getMoviesByDirectorId(
       directorIds: NonEmptyVector[Long],
   ): F[Map[Long, Seq[MovieDbModel.Movie]]]
+
+  def getMoviesByIds(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]]

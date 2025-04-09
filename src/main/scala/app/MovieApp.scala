@@ -121,6 +121,22 @@ object MovieApp:
       response <- Ok(moviesMap.getOrElse(directorId, Seq.empty).asJson)
     } yield response
 
+  private def getMovieById[F[_]: { MonadCancelThrow, Logger }](
+      mr: MovieRepository[F],
+      movieId: Long,
+      dsl: Http4sDsl[F],
+  ) =
+    import dsl.*
+
+    for {
+      movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
+      _ <- Logger[F].info(s"Fetching movie details for ID: $movieId")
+      response <- movieDetailsMap
+        .get(movieId)
+        .map(movie => Ok(movie.asJson))
+        .getOrElse(BadRequest(s"Movie id: '$movieId' not found!"))
+    } yield response
+
   private def getContentOfFileName[F[_]: { Async, Logger }](
       fileName: String,
       dsl: Http4sDsl[F],
@@ -196,6 +212,19 @@ object MovieApp:
       res <- Ok(data)
     } yield res
 
+  private def fetchJasonObject[F[_]: { Async, Logger }](
+      apiClient: ExternalApiClient[F],
+      dsl: Http4sDsl[F],
+  ) =
+    import dsl.*
+
+    val uri: Uri = Uri.unsafeFromString("http://127.0.0.1:8080/getMovieById/0")
+    for {
+      _ <- Logger[F].info("Fetching some json object recursively.")
+      obj <- apiClient.fetchAsJson[MovieDbModel.Movie](uri)
+      res <- Ok(obj.asJson)
+    } yield res
+
   private def allRoutes[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
       apiClient: ExternalApiClient[F],
@@ -214,6 +243,8 @@ object MovieApp:
         getActorDetails(mr, actorId, dsl)
       case GET -> Root / "getMoviesByDirector" / LongVar(directorId) =>
         getMoviesByDirectorId(mr, directorId, dsl)
+      case GET -> Root / "getMovieById" / LongVar(movieId) =>
+        getMovieById(mr, movieId, dsl)
       case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
         getContentOfFileName(fileName, dsl)
       case GET -> Root / "getFileExplicit" :? fileNameQueryParamDecoderMatcher(fileName) =>
@@ -224,6 +255,8 @@ object MovieApp:
         readTwoFilesInParallel(fileName1, fileName2, dsl)
       case GET -> Root / "fetchCompanyData" / companyName =>
         fetchCompanyData(companyName, apiClient, dsl)
+      case GET -> Root / "getJsonObject" =>
+        fetchJasonObject(apiClient, dsl)
     }
 
   private def allRoutesComplete[F[_]: { Async, Logger }](

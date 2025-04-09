@@ -9,7 +9,7 @@ import doobie.util.transactor.Transactor
 import fs2.Stream.*
 
 final class MovieRepositoryDb[F[_]: Async](xa: Transactor[F]) extends MovieRepository[F]:
-  def getDirectorsDetails(
+  override def getDirectorsDetails(
       firstName: Option[String],
       lastName: Option[String],
   ): F[Seq[MovieDbModel.Director]] =
@@ -22,7 +22,9 @@ final class MovieRepositoryDb[F[_]: Async](xa: Transactor[F]) extends MovieRepos
       .map(identity)
       .transact(xa)
 
-  def getDirectorDetails(directorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Director]] =
+  override def getDirectorDetails(
+      directorIds: NonEmptyVector[Long],
+  ): F[Map[Long, MovieDbModel.Director]] =
     val directorIdsVec = directorIds.toVector
     val e = Map.empty[Long, MovieDbModel.Director]
 
@@ -34,7 +36,7 @@ final class MovieRepositoryDb[F[_]: Async](xa: Transactor[F]) extends MovieRepos
       .lastOrError
       .transact(xa)
 
-  def getActorDetails(actorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Actor]] =
+  override def getActorDetails(actorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Actor]] =
     val actorIdsVec = actorIds.toVector
     val e = Map.empty[Long, MovieDbModel.Actor]
 
@@ -46,7 +48,7 @@ final class MovieRepositoryDb[F[_]: Async](xa: Transactor[F]) extends MovieRepos
       .lastOrError
       .transact(xa)
 
-  def getMoviesByDirectorId(
+  override def getMoviesByDirectorId(
       directorIds: NonEmptyVector[Long],
   ): F[Map[Long, Seq[MovieDbModel.Movie]]] =
     val directorIdsVec = directorIds.toVector
@@ -67,6 +69,18 @@ final class MovieRepositoryDb[F[_]: Async](xa: Transactor[F]) extends MovieRepos
           })
         }
       }
+      .compile
+      .lastOrError
+      .transact(xa)
+
+  override def getMoviesByIds(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]] =
+    val movieIdsVec = movieIds.toVector
+    val e = Map.empty[Long, MovieDbModel.Movie]
+
+    sql"""select movieId, title, year from movies where movieId = ANY($movieIdsVec)"""
+      .query[MovieDbModel.Movie]
+      .stream
+      .fold(e)((m, movie) => m.updated(movie.movieId, movie))
       .compile
       .lastOrError
       .transact(xa)
