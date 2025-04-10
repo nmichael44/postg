@@ -18,20 +18,20 @@ final class PersistentTreeBidiMap[K: Ordering, V: Ordering] private (
     new PersistentTreeBidiMap[K, V](m0New, m1New)
 
   def removeLeftKey(k: K): PersistentTreeBidiMap[K, V] =
-    m0.get(k).fold(this) { v =>
-      val m0New = m0.removed(k)
-      val m1New = m1.removed(v)
+    m0.get(k)
+      .fold(this): v =>
+        val m0New = m0.removed(k)
+        val m1New = m1.removed(v)
 
-      new PersistentTreeBidiMap[K, V](m0New, m1New)
-    }
+        new PersistentTreeBidiMap[K, V](m0New, m1New)
 
   def removeRightKey(v: V): PersistentTreeBidiMap[K, V] =
-    m1.get(v).fold(this) { k =>
-      val m0New = m0.removed(k)
-      val m1New = m1.removed(v)
+    m1.get(v)
+      .fold(this): k =>
+        val m0New = m0.removed(k)
+        val m1New = m1.removed(v)
 
-      new PersistentTreeBidiMap[K, V](m0New, m1New)
-    }
+        new PersistentTreeBidiMap[K, V](m0New, m1New)
 
   def iterator: Iterator[(K, V)] = m0.iterator
 
@@ -50,4 +50,5 @@ object PersistentTreeBidiMap:
   def from[K: Ordering, V: Ordering](it: IterableOnce[(K, V)]): PersistentTreeBidiMap[K, V] =
     val m = empty[K, V]
 
-    it.iterator.foldLeft(m) { case (mp, (k, v)) => mp.updated(k, v) }
+    it.iterator.foldLeft(m):
+      case (mp, (k, v)) => mp.updated(k, v)
