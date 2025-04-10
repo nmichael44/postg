@@ -5,6 +5,8 @@ import cats.effect.Async
 
 import java.time.LocalDate
 
+import app.ImplicitConversions.*
+
 final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepository[F]:
   private val Directors: Map[Long, MovieDbModel.Director] = Map(
     0L -> MovieDbModel.Director(0L, "Steven", "Spielberg", LocalDate.of(1965, 5, 1)),
@@ -40,19 +42,19 @@ final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepository[F]:
       directorIds: NonEmptyVector[Long],
   ): F[Map[Long, MovieDbModel.Director]] =
     Async[F].delay {
-      directorIds.toVector.view.flatMap(id => Directors.get(id).map(e => (id, e))).toMap
+      directorIds.view.flatMap(id => Directors.get(id).map(e => (id, e))).toMap
     }
 
   override def getActorDetails(actorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Actor]] =
     Async[F].delay {
-      actorIds.toVector.view.flatMap(id => Actors.get(id).map(e => (id, e))).toMap
+      actorIds.view.flatMap(id => Actors.get(id).map(e => (id, e))).toMap
     }
 
   override def getMoviesByDirectorId(
       directorIds: NonEmptyVector[Long],
   ): F[Map[Long, Seq[MovieDbModel.Movie]]] =
     Async[F].delay {
-      directorIds.toVector.view
+      directorIds.view
         .flatMap { directorId =>
           MovieToDirector.iterator.filter(p => p._2 == directorId)
         }
@@ -61,11 +63,9 @@ final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepository[F]:
     }
 
   override def getMoviesByIds(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]] =
+    val e = Map.empty[Long, MovieDbModel.Movie]
     Async[F].delay {
-      val vs = for {
-        movieId <- movieIds.toVector
-        movie <- Movies.get(movieId)
-      } yield (movieId, movie)
-
-      vs.toMap
+      movieIds.toVector.foldLeft(e) { (m, movieId) =>
+        Movies.get(movieId).fold(m)(m.updated(movieId, _))
+      }
     }
