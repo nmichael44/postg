@@ -12,26 +12,17 @@ final class PersistentTreeBidiMap[K: Ordering, V: Ordering] private (
   def getWithRight(v: V): Option[K] = m1.get(v)
 
   def updated(k: K, v: V): PersistentTreeBidiMap[K, V] =
-    val m0New = m0.removed(k).updated(k, v)
-    val m1New = m1.removed(v).updated(v, k)
-
-    new PersistentTreeBidiMap[K, V](m0New, m1New)
+    new PersistentTreeBidiMap[K, V](m0.removed(k).updated(k, v), m1.removed(v).updated(v, k))
 
   def removeLeftKey(k: K): PersistentTreeBidiMap[K, V] =
-    m0.get(k)
-      .fold(this): v =>
-        val m0New = m0.removed(k)
-        val m1New = m1.removed(v)
-
-        new PersistentTreeBidiMap[K, V](m0New, m1New)
+    m0.get(k).fold(this) { v =>
+      new PersistentTreeBidiMap[K, V](m0.removed(k), m1.removed(v))
+    }
 
   def removeRightKey(v: V): PersistentTreeBidiMap[K, V] =
-    m1.get(v)
-      .fold(this): k =>
-        val m0New = m0.removed(k)
-        val m1New = m1.removed(v)
-
-        new PersistentTreeBidiMap[K, V](m0New, m1New)
+    m1.get(v).fold(this) { k =>
+      new PersistentTreeBidiMap[K, V](m0.removed(k), m1.removed(v))
+    }
 
   def iterator: Iterator[(K, V)] = m0.iterator
 
@@ -48,7 +39,4 @@ object PersistentTreeBidiMap:
     new PersistentTreeBidiMap[K, V](TreeMap.empty, TreeMap.empty)
 
   def from[K: Ordering, V: Ordering](it: IterableOnce[(K, V)]): PersistentTreeBidiMap[K, V] =
-    val m = empty[K, V]
-
-    it.iterator.foldLeft(m):
-      case (mp, (k, v)) => mp.updated(k, v)
+    it.iterator.foldLeft(empty[K, V]) { case (mp, (k, v)) => mp.updated(k, v) }
