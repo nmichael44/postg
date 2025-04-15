@@ -30,6 +30,8 @@ object Utils:
 
   def isValidPort(port: Int): Boolean = port > 0 && port < 65536
 
+  // Not in use anymore... just keep for maybe later extract the validation code and
+  // move it to the new implementation.
   case class DatabaseConfig(
       host: String,
       port: Int,
