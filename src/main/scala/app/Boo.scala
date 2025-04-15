@@ -1,7 +1,5 @@
 package app
 
-import cats.effect.IO
-
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
@@ -47,20 +45,3 @@ object Boo:
         case (duration, _) => println(s"'hello' took $duration")
       }
   }
-
-  val x: IO[Int] = IO(12)
-  val y: IO[Unit] = IO(println(123))
-  val z: IO[Unit] = IO.println(456)
-  val omega: IO[Int] = IO.pure(789)
-
-  val e0: IO[Int] = IO(throw new RuntimeException("oh no!"))
-  val e1: IO[Int] = IO.raiseError(new RuntimeException("oh no!"))
-
-  import cats.syntax.all._
-
-  val x1: IO[String] = x.map(_.toString)
-  val zz: IO[(String, Int)] = (IO(2), IO("5")).mapN((i, s) => (i.toString, Integer.parseInt(s)))
-  val zz2: IO[String] = for {
-    i <- IO(2).debug()
-    j <- IO(4 + i)
-  } yield (j + 1).toString

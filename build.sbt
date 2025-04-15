@@ -8,6 +8,7 @@ lazy val doobieVersion = "1.0.0-RC8"
 lazy val http4sVersion = "0.23.30"
 lazy val circeVersion = "0.14.12"
 lazy val scalatestVersion = "3.2.19"
+lazy val pureConfigCoreVersion = "0.17.8"
 
 lazy val root = (project in file("."))
   .settings(
@@ -30,6 +31,7 @@ libraryDependencies ++= Seq(
   "io.circe" %% "circe-core" % circeVersion,
   "io.circe" %% "circe-generic" % circeVersion,
   "io.circe" %% "circe-parser" % circeVersion,
+  "com.github.pureconfig" %% "pureconfig-core" % pureConfigCoreVersion,
   "org.typelevel" %% "log4cats-slf4j" % "2.7.0",
   "ch.qos.logback" % "logback-classic" % logbackVersion % Runtime,
 

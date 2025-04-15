@@ -28,7 +28,7 @@ object Utils:
   private final val ServerHostIP = "ServerHostIP"
   private final val ServerHostPort = "ServerHostPort"
 
-  private def isValidPort(port: Int): Boolean = port > 0 && port < 65536
+  def isValidPort(port: Int): Boolean = port > 0 && port < 65536
 
   case class DatabaseConfig(
       host: String,

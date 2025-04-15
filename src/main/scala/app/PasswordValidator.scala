@@ -3,14 +3,15 @@ package app
 object PasswordValidator:
   private final val PasswordMinLen: Int = 8
 
-  private def hasCharWithProperty(pred: Char => Boolean)(password: String): Boolean =
+  private def hasCharWithProperty(pred: Char => Boolean, password: String): Boolean =
     password.exists(pred)
 
-  private val isLongEnough = (password: String) => password.length >= PasswordMinLen
-  private val hasUpperCase = hasCharWithProperty(_.isUpper)
-  private val hasLowerCase = hasCharWithProperty(_.isLower)
-  private val hasDigit = hasCharWithProperty(_.isDigit)
-  private val hasSpecialChar = hasCharWithProperty(c => !c.isLetterOrDigit)
+  private def isLongEnough(password: String) = password.length >= PasswordMinLen
+  private def hasUpperCase(password: String) = hasCharWithProperty(_.isUpper, password)
+  private def hasLowerCase(password: String) = hasCharWithProperty(_.isLower, password)
+  private def hasDigit(password: String) = hasCharWithProperty(_.isDigit, password)
+  private def hasSpecialChar(password: String) =
+    hasCharWithProperty(c => !c.isLetterOrDigit, password)
 
   // Returns a list of reasons why the password was not good enough.
   // If the sequence is empty then the password was good.

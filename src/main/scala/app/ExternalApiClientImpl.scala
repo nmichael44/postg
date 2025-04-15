@@ -1,10 +1,11 @@
 package app
 
 import cats.effect.Async
+
 import app.ExternalApiClientImpl.doRequest
 import io.circe.Decoder
-import org.http4s.circe.jsonOf
 import org.http4s.{Method, Request, Uri}
+import org.http4s.circe.jsonOf
 import org.http4s.client.Client
 
 final class ExternalApiClientImpl[F[_]: Async] private (client: Client[F])

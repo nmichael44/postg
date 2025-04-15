@@ -11,24 +11,26 @@ import cats.implicits.*
 
 import scala.concurrent.ExecutionContext
 
-import app.Utils.DatabaseConfig
+import app.AppConfig.AppConfig
 import doobie.*
 import doobie.free.connection
 import doobie.hikari.HikariTransactor
 import doobie.implicits.*
-import doobie.util.{fragment, transactor}
-import fs2.Stream
+import doobie.util.transactor
 
 object DoobieObj:
   private final val DriverName: String = "org.postgresql.Driver"
 
   private def createTransactor(
-      dbConfig: DatabaseConfig,
+      appConfig: AppConfig,
       ec: ExecutionContext,
   ): Resource[IO, HikariTransactor[IO]] =
-    val databaseURL = s"jdbc:postgresql://${dbConfig.host}:${dbConfig.port}/postgres"
-    val user = dbConfig.user
-    val password = dbConfig.password
+    val dbConfig = appConfig.getDbConnection
+    val (host, port) = (dbConfig.getHost, dbConfig.getPort)
+
+    val databaseURL = s"jdbc:postgresql://$host:$port/postgres"
+    val user = dbConfig.getUser
+    val password = dbConfig.getPassword
 
     HikariTransactor.newHikariTransactor[IO](
       DriverName,
@@ -49,8 +51,8 @@ object DoobieObj:
 //    logHandler = None // Don't set up logging for now. See Logging page for how to log events in detail
 //  )
 
-  def xaResource(dbConfig: DatabaseConfig): Resource[IO, HikariTransactor[IO]] =
-    createTransactor(dbConfig, ExecutionContext.global)
+  def xaResource(appConfig: AppConfig): Resource[IO, HikariTransactor[IO]] =
+    createTransactor(appConfig, ExecutionContext.global)
 
   /*
   def f1(xa: Transactor[IO]): IO[Int] = 42.pure[ConnectionIO].transact(xa)
