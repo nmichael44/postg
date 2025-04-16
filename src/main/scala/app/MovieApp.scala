@@ -1,36 +1,39 @@
 package app
 
-import app.AppConfig.AppConfig
-import app.MovieDbModel.DirectorPath
 import cats.data.NonEmptyVector
+import cats.effect.*
 import cats.effect.implicits.*
 import cats.effect.std.Queue
-import cats.effect.*
 import cats.syntax.all.*
 import cats.syntax.parallel.*
-import com.comcast.ip4s.{Ipv4Address, Port}
-import doobie.util.transactor.Transactor
-import io.circe.*
-import io.circe.generic.auto.*
-import io.circe.syntax.*
-import org.http4s.*
-import org.http4s.circe.*
-import org.http4s.client.middleware.FollowRedirect
-import org.http4s.dsl.Http4sDsl
-import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
-import org.http4s.dsl.io.*
-import org.http4s.ember.client.EmberClientBuilder
-import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.implicits.*
-import org.typelevel.log4cats.Logger
-import org.typelevel.log4cats.slf4j.Slf4jLogger
-import pureconfig.ConfigSource
-import pureconfig.error.ConfigReaderException
 
 import java.nio.file.Paths
 import scala.annotation.unused
 import scala.concurrent.duration.*
 import scala.io.Source
+
+import app.AppConfig.AppConfig
+import app.MovieDbModel.DirectorPath
+import com.comcast.ip4s.{Ipv4Address, Port}
+import doobie.util.transactor.Transactor
+import fs2.io.net.Network
+import io.circe.*
+import io.circe.generic.auto.*
+import io.circe.syntax.*
+import org.http4s
+import org.http4s.*
+import org.http4s.circe.*
+import org.http4s.client.middleware.FollowRedirect
+import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
+import org.http4s.dsl.io.*
+import org.http4s.dsl.Http4sDsl
+import org.http4s.ember.client.EmberClientBuilder
+import org.http4s.ember.server.EmberServerBuilder
+import org.http4s.implicits.*
+import org.typelevel.log4cats.slf4j.Slf4jLogger
+import org.typelevel.log4cats.Logger
+import pureconfig.error.ConfigReaderException
+import pureconfig.ConfigSource
 
 object MovieApp:
   private sealed trait ServerState[F[_]] {
@@ -48,7 +51,7 @@ object MovieApp:
   ) extends ServerState[F]
 
   private object LiveServerState:
-    def create[F[_]: { Async, Logger }]: F[ServerState[F]] =
+    def create[F[_]: Async]: F[ServerState[F]] =
       for {
         movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
         jobQ <- Queue.bounded[F, Job](BoundedQueueCapacity)
@@ -282,13 +285,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    for {
-      success <- serverState.jobQueue.tryOffer(Job(jobName))
-      res <-
+    serverState.jobQueue
+      .tryOffer(Job(jobName))
+      .flatMap { success =>
         if success
         then Ok(s"Task '$jobName' was enqueued properly.")
         else BadRequest(s"Could not enqueue '$jobName'. Queue was full.  Try again later.")
-    } yield res
+      }
 
   // Example call:
   // http://127.0.0.1:8080/getDirector/2
@@ -359,8 +362,7 @@ object MovieApp:
     (Ipv4Address.fromString(host), Port.fromInt(port)) match {
       case (Some(ipv4Address), Some(port)) => (ipv4Address, port)
       case (None, _) => throw new AssertionError(s"Illegal ServerHostIP: '$host'.")
-      case (_, None) =>
-        throw new AssertionError(s"Illegal ServerHostPort: '$port'.")
+      case (_, None) => throw new AssertionError(s"Illegal ServerHostPort: '$port'.")
     }
 
   private def worker[F[_]: { Temporal, Logger }](workerId: Int, queue: Queue[F, Job]): F[Nothing] =
@@ -385,7 +387,22 @@ object MovieApp:
     (1 to numWorkers).toList
       .parTraverse_(workerId => worker(workerId, queue).start)
 
+  // This is the number of redirects Ember will perform when a response
+  // specifies that a redirection.
   private final val MaxRedirects: Int = 5
+
+  private def createServerResource[F[_]: { Async, Network, Logger }](
+      serverHostIP: Ipv4Address,
+      serverHostPort: Port,
+      httpApp: HttpApp[F],
+  ): Resource[F, http4s.server.Server] =
+    EmberServerBuilder
+      .default[F]
+      .withHost(serverHostIP)
+      .withPort(serverHostPort)
+      .withShutdownTimeout(10.seconds)
+      .withHttpApp(httpApp)
+      .build
 
   def run(@unused args: List[String]): IO[ExitCode] =
     type F = IO
@@ -396,7 +413,7 @@ object MovieApp:
         EmberClientBuilder
           .default[F]
           .build
-          .map(client => FollowRedirect[F](MaxRedirects)(client))
+          .map(FollowRedirect[F](MaxRedirects))
           .use { httpClient =>
             val externalApiClient = ExternalApiClientImpl.create[F](httpClient)
             DoobieObj
@@ -405,23 +422,22 @@ object MovieApp:
                 val movieRepository: MovieRepository[F] = MovieRepositoryDb.create(xa)
                 val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
 
-                Slf4jLogger.create[IO].flatMap { implicit logger =>
-                  LiveServerState.create[F].flatMap { serverState =>
-                    val dsl: Http4sDsl[F] = Http4sDsl[F]
-                    val httpRoutes: HttpApp[F] =
-                      allRoutesComplete[F](movieRepository, externalApiClient, serverState, dsl)
+                Slf4jLogger.create[F].flatMap { implicit logger =>
+                  val dsl: Http4sDsl[F] = Http4sDsl[F]
 
-                    startWorkers(NumberOfWorkers, serverState.jobQueue) *>
-                      EmberServerBuilder
-                        .default[IO]
-                        .withHost(serverHostIP)
-                        .withPort(serverHostPort)
-                        .withShutdownTimeout(10.seconds)
-                        .withHttpApp(httpRoutes)
-                        .build
-                        .use(_ => Logger[F].info("Server started!") *> Async[F].never)
-                        .as(ExitCode.Success)
-                  }
+                  for {
+                    serverState <- LiveServerState.create[F]
+                    httpApp: HttpApp[F] = allRoutesComplete[F](
+                      movieRepository,
+                      externalApiClient,
+                      serverState,
+                      dsl,
+                    )
+                    _ <- startWorkers(NumberOfWorkers, serverState.jobQueue)
+                    httpServer <- createServerResource(serverHostIP, serverHostPort, httpApp)
+                      .use(_ => Logger[F].info("Server started!") *> Async[F].never)
+                      .as(ExitCode.Success)
+                  } yield httpServer
                 }
               }
           }

@@ -13,10 +13,10 @@
             <option value="$PROJECT_DIR$/project" />
           </set>
         </option>
-        <option name="sbtVersion" value="1.10.7" />
         <option name="useSbtShellForBuild" value="true" />
         <option name="useSbtShellForImport" value="true" />
       </SbtProjectSettings>
     </option>
+    <option name="maximumHeapSize" value="3072" />
   </component>
 </project>
