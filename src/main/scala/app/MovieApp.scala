@@ -435,7 +435,11 @@ object MovieApp:
                     )
                     _ <- startWorkers(NumberOfWorkers, serverState.jobQueue)
                     httpServer <- createServerResource(serverHostIP, serverHostPort, httpApp)
-                      .use(_ => Logger[F].info("Server started!") *> Async[F].never)
+                      .use(server =>
+                        Logger[F].info(
+                          s"Server started with base uri: '${server.baseUri.toString}'.",
+                        ) *> Async[F].never,
+                      )
                       .as(ExitCode.Success)
                   } yield httpServer
                 }

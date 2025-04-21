@@ -3,7 +3,9 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/modules/postg.iml" filepath="$PROJECT_DIR$/.idea/modules/postg.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/postg/postg.main.iml" filepath="$PROJECT_DIR$/.idea/modules/postg/postg.main.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/modules/postg.postg-build.iml" filepath="$PROJECT_DIR$/.idea/modules/postg.postg-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/postg/postg.test.iml" filepath="$PROJECT_DIR$/.idea/modules/postg/postg.test.iml" />
     </modules>
   </component>
 </project>

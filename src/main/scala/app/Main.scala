@@ -18,16 +18,22 @@ import org.http4s.{HttpApp, HttpRoutes, QueryParamDecoder}
 import org.http4s.dsl.*
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits.*
+import org.typelevel.log4cats.slf4j.Slf4jLogger
+import org.typelevel.log4cats.Logger
 
 object Main extends IOApp:
   override def run(args: List[String]): IO[ExitCode] = // Refs.run(args
-    // O2.g()
+    implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 
-    // Boo.Timing.doIt()
-    MovieApp.run(List.empty)
-    // IO(ExitCode.Success)
+    DeferredProducerConsumer.run
 
-    // MovieApp.run(args)
+// VecSummer.run
+
+// Boo.Timing.doIt()
+//MovieApp.run(List.empty)
+//
+
+// MovieApp.run(args)
 
 //  private def readInt[F[_]: MonadCancelThrow](console: Console[F]): F[Option[Int]] =
 //    console.readLine.map(_.toIntOption)

@@ -4,7 +4,7 @@ ThisBuild / scalaVersion := "3.6.2"
 
 lazy val postgresVersion = "42.7.5"
 lazy val logbackVersion = "1.5.18"
-lazy val doobieVersion = "1.0.0-RC8"
+lazy val doobieVersion = "1.0.0-RC9"
 lazy val http4sVersion = "0.23.30"
 lazy val circeVersion = "0.14.12"
 lazy val scalatestVersion = "3.2.19"
