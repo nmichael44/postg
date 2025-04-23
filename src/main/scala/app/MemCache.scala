@@ -98,13 +98,13 @@ object MemCache:
     for {
       cache <- MemCache.create[F, String, Int]
       _ <- logger.info("Putting key 'a' with no timeout.")
-      _ <- cache.put("a", 1, java.time.Duration.ofSeconds(20))
+      _ <- cache.put("a", 1)
       _ <- logger.info("Getting key 'a' immediately.")
       getA1 <- cache.get("a")
       _ <- logger.info(s"Result for 'a' after put (no timeout): $getA1") // Should be Some(1)
 
       _ <- logger.info("Putting key 'c' with no timeout.")
-      _ <- cache.put("c", 3, java.time.Duration.ofSeconds(18))
+      _ <- cache.put("c", 3)
 
       timeoutDuration = java.time.Duration.ofSeconds(2)
       _ <- logger.info(s"Putting key 'b' with timeout of $timeoutDuration.")

@@ -25,7 +25,7 @@ case class MyIO[A](run: () => Option[A]):
       },
     )
 
-object MyIO {
+object MyIO:
   def pure[A](a: A): MyIO[A] = MyIO(() => Some(a))
 
   def delay[A](a: => A): MyIO[A] = MyIO(() =>
@@ -58,4 +58,3 @@ object MyIO {
       j <- MyIO.delay(g(n + 1))
       m <- MyIO.delay(g(n + 1))
     } yield k + j + m
-}
