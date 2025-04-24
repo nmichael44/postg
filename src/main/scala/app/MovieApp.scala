@@ -3,7 +3,7 @@ package app
 import cats.data.NonEmptyVector
 import cats.effect.*
 import cats.effect.implicits.*
-import cats.effect.std.Queue
+import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
 import cats.syntax.parallel.*
 
@@ -24,6 +24,7 @@ import org.http4s
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.client.middleware.FollowRedirect
+import org.http4s.client.Client
 import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
 import org.http4s.dsl.io.*
 import org.http4s.dsl.Http4sDsl
@@ -57,7 +58,7 @@ object MovieApp:
         jobQ <- Queue.bounded[F, Job](BoundedQueueCapacity)
       } yield new LiveServerState[F](movieReqCounts, jobQ)
 
-  private def getDirectorsDetailsByName[F[_]: { MonadCancelThrow, Logger }](
+  private def getDirectorsDetailsByName[F[_]: { MonadCancelThrow, Logger as logger }](
       req: Request[F],
       mr: MovieRepository[F],
       directorPath: DirectorPath,
@@ -69,12 +70,12 @@ object MovieApp:
       .getOrElse {
         for {
           directorsDetails <- mr.getDirectorsDetails(directorPath.firstName, directorPath.lastName)
-          _ <- Logger[F].info("Fetching directors details")
+          _ <- logger.info("Fetching directors details")
           response <- Ok(directorsDetails.asJson): F[Response[F]]
         } yield response
       }
 
-  private def getDirectorDetails[F[_]: { MonadCancelThrow, Logger }](
+  private def getDirectorDetails[F[_]: { MonadCancelThrow, Logger as logger }](
       mr: MovieRepository[F],
       directorId: Long,
       dsl: Http4sDsl[F],
@@ -83,14 +84,14 @@ object MovieApp:
 
     for {
       directorDetailsMap <- mr.getDirectorDetails(NonEmptyVector.one(directorId))
-      _ <- Logger[F].info("Fetching director details")
+      _ <- logger.info("Fetching director details")
       response <- directorDetailsMap
         .get(directorId)
         .map(directorDetails => Ok(directorDetails.asJson))
         .getOrElse(BadRequest(s"Director id: '$directorId' not found!"))
     } yield response
 
-  private def getActorDetails[F[_]: { MonadCancelThrow, Logger }](
+  private def getActorDetails[F[_]: { MonadCancelThrow, Logger as logger }](
       mr: MovieRepository[F],
       actorId: Long,
       dsl: Http4sDsl[F],
@@ -99,7 +100,7 @@ object MovieApp:
 
     for {
       actorDetailsMap <- mr.getActorDetails(NonEmptyVector.one(actorId))
-      _ <- Logger[F].info(s"Fetching actor details for ID: $actorId")
+      _ <- logger.info(s"Fetching actor details for ID: $actorId")
       response <- actorDetailsMap
         .get(actorId)
         .map(actorDetails => Ok(actorDetails.asJson))
@@ -135,7 +136,7 @@ object MovieApp:
     mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
       .map(m => m.getOrElse(directorId, Seq.empty))
 
-  private def getMoviesByDirectorId[F[_]: { MonadCancelThrow, Logger }](
+  private def getMoviesByDirectorId[F[_]: { MonadCancelThrow, Logger as logger }](
       mr: MovieRepository[F],
       directorId: Long,
       dsl: Http4sDsl[F],
@@ -144,11 +145,11 @@ object MovieApp:
 
     for {
       moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
-      _ <- Logger[F].info(s"Fetching movies for director ID: $directorId")
+      _ <- logger.info(s"Fetching movies for director ID: $directorId")
       response <- Ok(moviesMap.getOrElse(directorId, Seq.empty).asJson)
     } yield response
 
-  private def getMovieById[F[_]: { MonadCancelThrow, Logger }](
+  private def getMovieById[F[_]: { MonadCancelThrow, Logger as logger }](
       mr: MovieRepository[F],
       movieId: Long,
       dsl: Http4sDsl[F],
@@ -157,14 +158,14 @@ object MovieApp:
 
     for {
       movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
-      _ <- Logger[F].info(s"Fetching movie details for ID: $movieId")
+      _ <- logger.info(s"Fetching movie details for ID: $movieId")
       response <- movieDetailsMap
         .get(movieId)
         .map(movie => Ok(movie.asJson))
         .getOrElse(BadRequest(s"Movie id: '$movieId' not found!"))
     } yield response
 
-  private def getMovieByIdWithCounting[F[_]: { MonadCancelThrow, Logger }](
+  private def getMovieByIdWithCounting[F[_]: { MonadCancelThrow, Logger as logger }](
       mr: MovieRepository[F],
       movieId: Long,
       serverState: ServerState[F],
@@ -172,7 +173,6 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    val logger = Logger[F]
     for {
       _ <- logger.info(s"Fetching movie details for ID: $movieId and incrementing counter count")
       movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
@@ -190,14 +190,14 @@ object MovieApp:
         }
     } yield response
 
-  private def getContentOfFileName[F[_]: { Async, Logger }](
+  private def getContentOfFileName[F[_]: { Async, Logger as logger }](
       fileName: String,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
     for {
-      _ <- Logger[F].info(s"Asked to read file: '$fileName'.")
+      _ <- logger.info(s"Asked to read file: '$fileName'.")
       res <- fs2.io.file.Files
         .forAsync[F]
         .readAll(fs2.io.file.Path(fileName)) // Read file as Stream[IO, Byte]
@@ -208,14 +208,14 @@ object MovieApp:
         .handleErrorWith(ex => BadRequest(s"Error reading file: ${ex.getMessage}"))
     } yield res
 
-  private def getContentOfFileNameExplicit[F[_]: { Async, Logger }](
+  private def getContentOfFileNameExplicit[F[_]: { Async, Logger as logger }](
       fileName: String,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
     for {
-      _ <- Logger[F].info(s"Asked to read file explicitly: '$fileName'.")
+      _ <- logger.info(s"Asked to read file explicitly: '$fileName'.")
       res <- readFileContent(Paths.get(fileName)).use(c => Ok(Async[F].pure(c)))
     } yield res
 
@@ -232,14 +232,13 @@ object MovieApp:
       )(source => Async[F].blocking(source.close()))
       .map(_.mkString)
 
-  private def readTwoFilesInParallel[F[_]: { Async, Logger }](
+  private def readTwoFilesInParallel[F[_]: { Async, Logger as logger }](
       fileName1: String,
       fileName2: String,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    val logger = Logger[F]
     for {
       _ <- logger.info(s"Reading the two files in parallel.")
       _ <- logger.info(s"FileName1 = '$fileName1'")
@@ -264,21 +263,21 @@ object MovieApp:
       res <- Ok(data)
     } yield res
 
-  private def fetchJasonObject[F[_]: { Async, Logger }](
+  private def fetchJasonObject[F[_]: { Async, Logger as logger }](
       apiClient: ExternalApiClient[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
     for {
-      _ <- Logger[F].info("Fetching some json object recursively.")
+      _ <- logger.info("Fetching some json object recursively.")
       obj <- apiClient.fetchAsJson[MovieDbModel.Movie](
         Uri.unsafeFromString("http://127.0.0.1:8080/getMovieById/0"),
       )
       res <- Ok(obj.asJson)
     } yield res
 
-  private def enqueueJob[F[_]: { Async, Logger }](
+  private def enqueueJob[F[_]: Async](
       jobName: String,
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
@@ -298,6 +297,7 @@ object MovieApp:
   private def allRoutes[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
       apiClient: ExternalApiClient[F],
+      supervisor: Supervisor[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpRoutes[F] =
@@ -337,10 +337,11 @@ object MovieApp:
   private def allRoutesComplete[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
       apiClient: ExternalApiClient[F],
+      supervisor: Supervisor[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
-    allRoutes[F](mr, apiClient, serverState, dsl).orNotFound
+    allRoutes[F](mr, apiClient, supervisor, serverState, dsl).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
       allowedParams: Set[String],
@@ -365,9 +366,10 @@ object MovieApp:
       case (_, None) => throw new AssertionError(s"Illegal ServerHostPort: '$port'.")
     }
 
-  private def worker[F[_]: { Temporal, Logger }](workerId: Int, queue: Queue[F, Job]): F[Nothing] =
-    val logger = Logger[F]
-
+  private def worker[F[_]: { Temporal, Logger as logger }](
+      workerId: Int,
+      queue: Queue[F, Job],
+  ): F[Nothing] =
     val processJob: F[Unit] = for {
       _ <- logger.info(s"Worker '$workerId' waiting for work.")
       job <- queue.take
@@ -378,18 +380,19 @@ object MovieApp:
 
     processJob.foreverM
 
-  private final val NumberOfWorkers: Int = 16
+  inline private val NumberOfWorkers = 16
 
   private def startWorkers[F[_]: { Temporal, Logger }](
       numWorkers: Int,
       queue: Queue[F, Job],
+      supervisor: Supervisor[F],
   ): F[Unit] =
     (1 to numWorkers).toList
-      .parTraverse_(workerId => worker(workerId, queue).start)
+      .traverse_(workerId => supervisor.supervise(worker(workerId, queue)))
 
   // This is the number of redirects Ember will perform when a response
   // specifies that a redirection.
-  private final val MaxRedirects: Int = 5
+  inline private val MaxRedirects = 5
 
   private def createServerResource[F[_]: { Async, Network, Logger }](
       serverHostIP: Ipv4Address,
@@ -410,39 +413,38 @@ object MovieApp:
     ConfigSource.default.at("app-config").load[AppConfig] match {
       case Left(failures) => IO.raiseError(ConfigReaderException[AppConfig](failures))
       case Right(appConfig) =>
-        EmberClientBuilder
-          .default[F]
-          .build
-          .map(FollowRedirect[F](MaxRedirects))
-          .use { httpClient =>
+        Slf4jLogger.create[F].flatMap { implicit logger =>
+          val coreResources: Resource[F, (Client[F], Supervisor[F], Transactor[F])] =
+            for {
+              httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
+              supervisor <- Supervisor[F]
+              xa <- DoobieObj.xaResource(appConfig)
+            } yield (httpClient, supervisor, xa)
+
+          coreResources.use { (httpClient, supervisor, xa) =>
             val externalApiClient = ExternalApiClientImpl.create[F](httpClient)
-            DoobieObj
-              .xaResource(appConfig)
-              .use { (xa: Transactor[F]) =>
-                val movieRepository: MovieRepository[F] = MovieRepositoryDb.create(xa)
-                val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
+            val movieRepository: MovieRepository[F] = MovieRepositoryDb.create(xa)
+            val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
+            val dsl: Http4sDsl[F] = Http4sDsl[F]
 
-                Slf4jLogger.create[F].flatMap { implicit logger =>
-                  val dsl: Http4sDsl[F] = Http4sDsl[F]
-
-                  for {
-                    serverState <- LiveServerState.create[F]
-                    httpApp: HttpApp[F] = allRoutesComplete[F](
-                      movieRepository,
-                      externalApiClient,
-                      serverState,
-                      dsl,
-                    )
-                    _ <- startWorkers(NumberOfWorkers, serverState.jobQueue)
-                    httpServer <- createServerResource(serverHostIP, serverHostPort, httpApp)
-                      .use(server =>
-                        Logger[F].info(
-                          s"Server started with base uri: '${server.baseUri.toString}'.",
-                        ) *> Async[F].never,
-                      )
-                      .as(ExitCode.Success)
-                  } yield httpServer
-                }
-              }
+            for {
+              serverState <- LiveServerState.create[F]
+              httpApp: HttpApp[F] = allRoutesComplete[F](
+                movieRepository,
+                externalApiClient,
+                supervisor,
+                serverState,
+                dsl,
+              )
+              _ <- startWorkers(NumberOfWorkers, serverState.jobQueue, supervisor)
+              httpServer <- createServerResource(serverHostIP, serverHostPort, httpApp)
+                .use(server =>
+                  logger.info(
+                    s"Server started with base uri: '${server.baseUri.toString}'.",
+                  ) *> Async[F].never,
+                )
+                .as(ExitCode.Success)
+            } yield httpServer
           }
+        }
     }
