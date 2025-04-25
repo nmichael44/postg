@@ -12,7 +12,7 @@ import org.typelevel.log4cats.Logger
 object HttpWorker:
   final class Job[F[_]](
       val jobName: String,
-      val f: () => F[Response[F]],
+      val program: () => F[Response[F]],
       val deferred: Deferred[F, Either[Throwable, Response[F]]],
   )
 
@@ -61,7 +61,7 @@ object HttpWorker:
 
     val processOneJob: F[Unit] = for {
       _ <- logger.info(s"$prompt: Waiting for work.")
-      (jobName, programBuilder, deferred) <- queue.take.map(j => (j.jobName, j.f, j.deferred))
+      (jobName, programBuilder, deferred) <- queue.take.map(j => (j.jobName, j.program, j.deferred))
       _ <- logger.info(s"$prompt: Starting to work on '$jobName'.")
       // Build the program
       program <- buildProgram(prompt, jobName, deferred, programBuilder)
