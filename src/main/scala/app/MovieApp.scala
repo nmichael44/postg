@@ -62,14 +62,14 @@ object MovieApp:
       jobName: String,
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
-      f: () => F[Response[F]],
+      programBuilder: () => F[Response[F]],
   ): F[Response[F]] = {
     import dsl.*
 
     for {
       d <- Deferred[F, Either[Throwable, Response[F]]]
       _ <- logger.info(s"Queueing job '$jobName'.")
-      _ <- serverState.jobQueue.offer(HttpWorker.Job(jobName, f, d))
+      _ <- serverState.jobQueue.offer(HttpWorker.Job(jobName, programBuilder, d))
       _ <- logger.info(s"Job '$jobName' queued. Waiting for response.")
       outcome <- d.get // Wait for the answer
       _ <- logger.info(s"Job '$jobName': Response received.")
@@ -311,11 +311,11 @@ object MovieApp:
       .evalMap(source => Async[F].blocking(source.mkString))
 
   // An alternative implementation of the function above.
-  private def readFileContent2[F[_]: { Async }](path: java.nio.file.Path): Resource[F, String] =
+  private def readFileContent2[F[_]: { Async as async }](
+      path: java.nio.file.Path,
+  ): Resource[F, String] =
     Resource
-      .make(
-        Async[F].blocking(Source.fromFile(path.toFile)),
-      )(source => Async[F].blocking(source.close()))
+      .make(async.blocking(Source.fromFile(path.toFile)))(source => async.blocking(source.close()))
       .map(_.mkString)
 
   private def readTwoFilesInParallel[F[_]: { Async, Logger as logger }](

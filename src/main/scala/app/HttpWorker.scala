@@ -12,7 +12,7 @@ import org.typelevel.log4cats.Logger
 object HttpWorker:
   final class Job[F[_]](
       val jobName: String,
-      val program: () => F[Response[F]],
+      val programBuilder: () => F[Response[F]],
       val deferred: Deferred[F, Either[Throwable, Response[F]]],
   )
 
@@ -61,19 +61,21 @@ object HttpWorker:
 
     val processOneJob: F[Unit] = for {
       _ <- logger.info(s"$prompt: Waiting for work.")
-      (jobName, programBuilder, deferred) <- queue.take.map(j => (j.jobName, j.program, j.deferred))
+      (jobName, programBuilder, deferred) <- queue.take.map(j =>
+        (j.jobName, j.programBuilder, j.deferred),
+      )
       _ <- logger.info(s"$prompt: Starting to work on '$jobName'.")
-      // Build the program
+      // Build the program -- if something goes wrong, the function returns an error.
       program <- buildProgram(prompt, jobName, deferred, programBuilder)
-      // and now execute it
+      // Program built successfully, so let's execute it.
       outcome <- executeProgram(prompt, jobName, program)
-      // finally, send the results back to the calling fiber.
+      // Finally, send the results back to the calling fiber.
       _ <- logger.info(s"$prompt: Sending results of job '$jobName' back...")
       _ <- deferred.complete(outcome)
     } yield ()
 
     val processOneJobSafely: F[Unit] = processOneJob.handleErrorWith { e =>
-      logger.error(e)(s"Worker '$workerId': Unhandled worker error. Restarting...") *>
+      logger.error(e)(s"$prompt: Unhandled worker error. Restarting...") *>
         async.sleep(1.second)
     }
 
