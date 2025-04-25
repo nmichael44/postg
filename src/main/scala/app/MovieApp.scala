@@ -3,12 +3,12 @@ package app
 import cats.data.NonEmptyVector
 import cats.effect.*
 import cats.effect.implicits.*
+import cats.effect.kernel.Async
 import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
 import cats.syntax.parallel.*
 
 import java.nio.file.Paths
-import scala.annotation.unused
 import scala.concurrent.duration.*
 import scala.io.Source
 
@@ -24,7 +24,6 @@ import org.http4s
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.client.middleware.FollowRedirect
-import org.http4s.client.Client
 import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
 import org.http4s.dsl.io.*
 import org.http4s.dsl.Http4sDsl
@@ -39,73 +38,120 @@ import pureconfig.ConfigSource
 object MovieApp:
   private sealed trait ServerState[F[_]] {
     val movieRequestCounts: Ref[F, Map[Long, Int]]
-    val jobQueue: Queue[F, Job]
+    val jobQueue: Queue[F, Job[F]]
   }
 
-  private case class Job(jobName: String)
+  private final class Job[F[_]](
+      val f: () => F[Response[F]],
+      val d: Deferred[F, Either[Throwable, Response[F]]],
+  )
 
   private final val BoundedQueueCapacity: Int = 256
 
   private final case class LiveServerState[F[_]](
       movieRequestCounts: Ref[F, Map[Long, Int]],
-      jobQueue: Queue[F, Job],
+      jobQueue: Queue[F, Job[F]],
   ) extends ServerState[F]
 
   private object LiveServerState:
     def create[F[_]: Async]: F[ServerState[F]] =
       for {
         movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
-        jobQ <- Queue.bounded[F, Job](BoundedQueueCapacity)
+        jobQ <- Queue.bounded[F, Job[F]](BoundedQueueCapacity)
       } yield new LiveServerState[F](movieReqCounts, jobQ)
 
-  private def getDirectorsDetailsByName[F[_]: { MonadCancelThrow, Logger as logger }](
+  // The approach we have taken here is to have the worker fiber build the "recipe" i.e.
+  // construct the F[_] program that we are going to execute.  This is in the spirit
+  // of keeping the http4s fiber work to a minimum and have the worker do all the work.
+  private def enqueueJobAndWaitForResult[F[_]: { Async as async, Logger as logger }](
+      serverState: ServerState[F],
+      dsl: Http4sDsl[F],
+      f: () => F[Response[F]],
+  ): F[Response[F]] = {
+    import dsl.*
+
+    for {
+      d <- Deferred[F, Either[Throwable, Response[F]]]
+      _ <- serverState.jobQueue.offer(Job(f, d))
+      outcome <- d.get // Wait for the answer
+      response <- outcome match {
+        case Right(resp) => async.pure(resp)
+        case Left(e) =>
+          // Handle the error, e.g., return an InternalServerError response
+          logger.error(e)("Job failed") *> dsl.InternalServerError()
+      }
+    } yield response
+  }
+
+  private def getDirectorsDetailsByName[F[_]: { Async, Logger as logger }](
       req: Request[F],
       mr: MovieRepository[F],
+      serverState: ServerState[F],
       directorPath: DirectorPath,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    ensureOnlyAllowedParams(allowedParamsForGetDirectors, req, dsl)
-      .getOrElse {
-        for {
-          directorsDetails <- mr.getDirectorsDetails(directorPath.firstName, directorPath.lastName)
-          _ <- logger.info("Fetching directors details")
-          response <- Ok(directorsDetails.asJson): F[Response[F]]
-        } yield response
-      }
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        ensureOnlyAllowedParams(allowedParamsForGetDirectors, req, dsl)
+          .getOrElse {
+            for {
+              directorsDetails <- mr.getDirectorsDetails(
+                directorPath.firstName,
+                directorPath.lastName,
+              )
+              _ <- logger.info("Fetching directors details")
+              response <- Ok(directorsDetails.asJson)
+            } yield response
+          },
+    )
 
-  private def getDirectorDetails[F[_]: { MonadCancelThrow, Logger as logger }](
+  private def getDirectorDetails[F[_]: { Async, Logger as logger }](
       mr: MovieRepository[F],
+      serverState: ServerState[F],
       directorId: Long,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    for {
-      directorDetailsMap <- mr.getDirectorDetails(NonEmptyVector.one(directorId))
-      _ <- logger.info("Fetching director details")
-      response <- directorDetailsMap
-        .get(directorId)
-        .map(directorDetails => Ok(directorDetails.asJson))
-        .getOrElse(BadRequest(s"Director id: '$directorId' not found!"))
-    } yield response
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          directorDetailsMap <- mr.getDirectorDetails(NonEmptyVector.one(directorId))
+          _ <- logger.info("Fetching director details")
+          response <- directorDetailsMap
+            .get(directorId)
+            .map(directorDetails => Ok(directorDetails.asJson))
+            .getOrElse(BadRequest(s"Director id: '$directorId' not found!"))
+        } yield response,
+    )
 
-  private def getActorDetails[F[_]: { MonadCancelThrow, Logger as logger }](
+  private def getActorDetails[F[_]: { Async, Logger as logger }](
       mr: MovieRepository[F],
+      serverState: ServerState[F],
       actorId: Long,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    for {
-      actorDetailsMap <- mr.getActorDetails(NonEmptyVector.one(actorId))
-      _ <- logger.info(s"Fetching actor details for ID: $actorId")
-      response <- actorDetailsMap
-        .get(actorId)
-        .map(actorDetails => Ok(actorDetails.asJson))
-        .getOrElse(BadRequest(s"Actor id: '$actorId' not found!"))
-    } yield response
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          actorDetailsMap <- mr.getActorDetails(NonEmptyVector.one(actorId))
+          _ <- logger.info(s"Fetching actor details for ID: $actorId")
+          response <- actorDetailsMap
+            .get(actorId)
+            .map(actorDetails => Ok(actorDetails.asJson))
+            .getOrElse(BadRequest(s"Actor id: '$actorId' not found!"))
+        } yield response,
+    )
 
   private val firstNameParam: String = "firstName"
 
@@ -136,36 +182,48 @@ object MovieApp:
     mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
       .map(m => m.getOrElse(directorId, Seq.empty))
 
-  private def getMoviesByDirectorId[F[_]: { MonadCancelThrow, Logger as logger }](
+  private def getMoviesByDirectorId[F[_]: { Async, Logger as logger }](
       mr: MovieRepository[F],
+      serverState: ServerState[F],
       directorId: Long,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    for {
-      moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
-      _ <- logger.info(s"Fetching movies for director ID: $directorId")
-      response <- Ok(moviesMap.getOrElse(directorId, Seq.empty).asJson)
-    } yield response
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
+          _ <- logger.info(s"Fetching movies for director ID: $directorId")
+          response <- Ok(moviesMap.getOrElse(directorId, Seq.empty).asJson)
+        } yield response,
+    )
 
-  private def getMovieById[F[_]: { MonadCancelThrow, Logger as logger }](
+  private def getMovieById[F[_]: { Async, Logger as logger }](
       mr: MovieRepository[F],
+      serverState: ServerState[F],
       movieId: Long,
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    for {
-      movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
-      _ <- logger.info(s"Fetching movie details for ID: $movieId")
-      response <- movieDetailsMap
-        .get(movieId)
-        .map(movie => Ok(movie.asJson))
-        .getOrElse(BadRequest(s"Movie id: '$movieId' not found!"))
-    } yield response
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
+          _ <- logger.info(s"Fetching movie details for ID: $movieId")
+          response <- movieDetailsMap
+            .get(movieId)
+            .map(movie => Ok(movie.asJson))
+            .getOrElse(BadRequest(s"Movie id: '$movieId' not found!"))
+        } yield response,
+    )
 
-  private def getMovieByIdWithCounting[F[_]: { MonadCancelThrow, Logger as logger }](
+  private def getMovieByIdWithCounting[F[_]: { Async, Logger as logger }](
       mr: MovieRepository[F],
       movieId: Long,
       serverState: ServerState[F],
@@ -173,51 +231,70 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    for {
-      _ <- logger.info(s"Fetching movie details for ID: $movieId and incrementing counter count")
-      movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
-      response <- movieDetailsMap
-        .get(movieId)
-        .fold(BadRequest(s"Movie id: '$movieId' not found!")) { movie =>
-          for {
-            newCountForMovie <- serverState.movieRequestCounts.modify { counts =>
-              val newCounts = counts.updatedWith(movieId)(_.fold(1)(_ + 1).some)
-              (newCounts, newCounts(movieId))
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          _ <- logger.info(
+            s"Fetching movie details for ID: $movieId and incrementing counter count",
+          )
+          movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
+          response <- movieDetailsMap
+            .get(movieId)
+            .fold(BadRequest(s"Movie id: '$movieId' not found!")) { movie =>
+              for {
+                newCountForMovie <- serverState.movieRequestCounts.modify { counts =>
+                  val newCounts = counts.updatedWith(movieId)(_.fold(1)(_ + 1).some)
+                  (newCounts, newCounts(movieId))
+                }
+                _ <- logger.info(s"Counter now is $newCountForMovie")
+                okResponse <- Ok(movie.asJson)
+              } yield okResponse
             }
-            _ <- logger.info(s"Counter now is $newCountForMovie")
-            okResponse <- Ok(movie.asJson)
-          } yield okResponse
-        }
-    } yield response
+        } yield response,
+    )
 
   private def getContentOfFileName[F[_]: { Async, Logger as logger }](
       fileName: String,
+      serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    for {
-      _ <- logger.info(s"Asked to read file: '$fileName'.")
-      res <- fs2.io.file.Files
-        .forAsync[F]
-        .readAll(fs2.io.file.Path(fileName)) // Read file as Stream[IO, Byte]
-        .through(fs2.text.utf8.decode) // Decode to UTF-8 string
-        .compile
-        .string
-        .flatMap(Ok(_))
-        .handleErrorWith(ex => BadRequest(s"Error reading file: ${ex.getMessage}"))
-    } yield res
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          _ <- logger.info(s"Asked to read file: '$fileName'.")
+          res <- fs2.io.file.Files
+            .forAsync[F]
+            .readAll(fs2.io.file.Path(fileName)) // Read file as Stream[IO, Byte]
+            .through(fs2.text.utf8.decode) // Decode to UTF-8 string
+            .compile
+            .string
+            .flatMap(Ok(_))
+            .handleErrorWith(ex => BadRequest(s"Error reading file: ${ex.getMessage}"))
+        } yield res,
+    )
 
   private def getContentOfFileNameExplicit[F[_]: { Async, Logger as logger }](
       fileName: String,
+      serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    for {
-      _ <- logger.info(s"Asked to read file explicitly: '$fileName'.")
-      res <- readFileContent(Paths.get(fileName)).use(c => Ok(Async[F].pure(c)))
-    } yield res
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          _ <- logger.info(s"Asked to read file explicitly: '$fileName'.")
+          res <- readFileContent(Paths.get(fileName)).use(c => Ok(Async[F].pure(c)))
+        } yield res,
+    )
 
   private def readFileContent[F[_]: { Async }](path: java.nio.file.Path): Resource[F, String] =
     Resource
@@ -235,62 +312,65 @@ object MovieApp:
   private def readTwoFilesInParallel[F[_]: { Async, Logger as logger }](
       fileName1: String,
       fileName2: String,
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
-    for {
-      _ <- logger.info(s"Reading the two files in parallel.")
-      _ <- logger.info(s"FileName1 = '$fileName1'")
-      _ <- logger.info(s"FileName2 = '$fileName2'")
-      res <- Ok(
-        (
-          readFileContent(Paths.get(fileName1)).use(Async[F].pure),
-          readFileContent(Paths.get(fileName2)).use(Async[F].pure),
-        ).parMapN((c1, c2) => c1 + c2),
-      )
-    } yield res
-
-  private def fetchCompanyData[F[_]: { Async }](
-      companyName: String,
-      apiClient: ExternalApiClient[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
-    for {
-      data <- apiClient.fetchCompanyData(companyName)
-      res <- Ok(data)
-    } yield res
-
-  private def fetchJasonObject[F[_]: { Async, Logger as logger }](
-      apiClient: ExternalApiClient[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
-    for {
-      _ <- logger.info("Fetching some json object recursively.")
-      obj <- apiClient.fetchAsJson[MovieDbModel.Movie](
-        Uri.unsafeFromString("http://127.0.0.1:8080/getMovieById/0"),
-      )
-      res <- Ok(obj.asJson)
-    } yield res
-
-  private def enqueueJob[F[_]: Async](
-      jobName: String,
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
     import dsl.*
 
-    serverState.jobQueue
-      .tryOffer(Job(jobName))
-      .flatMap { success =>
-        if success
-        then Ok(s"Task '$jobName' was enqueued properly.")
-        else BadRequest(s"Could not enqueue '$jobName'. Queue was full.  Try again later.")
-      }
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          _ <- logger.info(s"Reading the two files in parallel.")
+          _ <- logger.info(s"FileName1 = '$fileName1'")
+          _ <- logger.info(s"FileName2 = '$fileName2'")
+          res <- Ok(
+            (
+              readFileContent(Paths.get(fileName1)).use(Async[F].pure),
+              readFileContent(Paths.get(fileName2)).use(Async[F].pure),
+            ).parMapN((c1, c2) => c1 + c2),
+          )
+        } yield res,
+    )
+
+  private def fetchCompanyData[F[_]: { Async, Logger }](
+      companyName: String,
+      apiClient: ExternalApiClient[F],
+      serverState: ServerState[F],
+      dsl: Http4sDsl[F],
+  ): F[Response[F]] =
+    import dsl.*
+
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          data <- apiClient.fetchCompanyData(companyName)
+          res <- Ok(data)
+        } yield res,
+    )
+
+  private def fetchJasonObject[F[_]: { Async, Logger as logger }](
+      apiClient: ExternalApiClient[F],
+      serverState: ServerState[F],
+      dsl: Http4sDsl[F],
+  ): F[Response[F]] =
+    import dsl.*
+
+    enqueueJobAndWaitForResult(
+      serverState,
+      dsl,
+      () =>
+        for {
+          _ <- logger.info("Fetching some json object recursively.")
+          obj <- apiClient.fetchAsJson[MovieDbModel.Movie](
+            Uri.unsafeFromString("http://127.0.0.1:8080/getMovieById/0"),
+          )
+          res <- Ok(obj.asJson)
+        } yield res,
+    )
 
   // Example call:
   // http://127.0.0.1:8080/getDirector/2
@@ -307,31 +387,29 @@ object MovieApp:
       case req @ GET -> Root / "getDirectorsByName" :? firstNameOptionalQueryParamDecoderMatcher(
             firstName,
           ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>
-        getDirectorsDetailsByName(req, mr, DirectorPath(firstName, lastName), dsl)
+        getDirectorsDetailsByName(req, mr, serverState, DirectorPath(firstName, lastName), dsl)
       case GET -> Root / "getDirector" / LongVar(directorId) =>
-        getDirectorDetails(mr, directorId, dsl)
+        getDirectorDetails(mr, serverState, directorId, dsl)
       case GET -> Root / "getActor" / LongVar(actorId) =>
-        getActorDetails(mr, actorId, dsl)
+        getActorDetails(mr, serverState, actorId, dsl)
       case GET -> Root / "getMoviesByDirector" / LongVar(directorId) =>
-        getMoviesByDirectorId(mr, directorId, dsl)
+        getMoviesByDirectorId(mr, serverState, directorId, dsl)
       case GET -> Root / "getMovieById" / LongVar(movieId) =>
-        getMovieById(mr, movieId, dsl)
+        getMovieById(mr, serverState, movieId, dsl)
       case GET -> Root / "getMovieByIdWithCounting" / LongVar(movieId) =>
         getMovieByIdWithCounting(mr, movieId, serverState, dsl)
       case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
-        getContentOfFileName(fileName, dsl)
+        getContentOfFileName(fileName, serverState, dsl)
       case GET -> Root / "getFileExplicit" :? fileNameQueryParamDecoderMatcher(fileName) =>
-        getContentOfFileNameExplicit(fileName, dsl)
+        getContentOfFileNameExplicit(fileName, serverState, dsl)
       case GET -> Root / "readTwoFilesInParallel" :? fileName1QueryParamDecoderMatcher(
             fileName1,
           ) +& fileName2QueryParamDecoderMatcher(fileName2) =>
-        readTwoFilesInParallel(fileName1, fileName2, dsl)
+        readTwoFilesInParallel(fileName1, fileName2, serverState, dsl)
       case GET -> Root / "fetchCompanyData" / companyName =>
-        fetchCompanyData(companyName, apiClient, dsl)
+        fetchCompanyData(companyName, apiClient, serverState, dsl)
       case GET -> Root / "getJsonObject" =>
-        fetchJasonObject(apiClient, dsl)
-      case GET -> Root / "enqueueJob" / jobName =>
-        enqueueJob(jobName, serverState, dsl)
+        fetchJasonObject(apiClient, serverState, dsl)
     }
 
   private def allRoutesComplete[F[_]: { Async, Logger }](
@@ -366,28 +444,47 @@ object MovieApp:
       case (_, None) => throw new AssertionError(s"Illegal ServerHostPort: '$port'.")
     }
 
-  private def worker[F[_]: { Temporal, Logger as logger }](
+  private def worker[F[_]: { Temporal as temporal, Logger as logger }](
       workerId: Int,
-      queue: Queue[F, Job],
+      queue: Queue[F, Job[F]],
   ): F[Nothing] =
     val processJob: F[Unit] = for {
       _ <- logger.info(s"Worker '$workerId' waiting for work.")
       job <- queue.take
-      _ <- logger.info(s"Worker '$workerId' received job '${job.jobName}'.")
-      _ <- Temporal[F].sleep(500.milliseconds)
-      _ <- logger.info(s"Worker '$workerId' completed job '${job.jobName}'.")
+      _ <- logger.info(s"Worker '$workerId' starting to work.")
+      outcome <- job.f().attempt
+      _ <- outcome match {
+        case Right(_) => logger.info(s"Worker '$workerId' completed job successfully.")
+        case Left(e) => logger.error(e)(s"Worker '$workerId' job failed with error.")
+      }
+      _ <- logger.info(s"Worker '$workerId': Sending results back...")
+      completed <- job.d.complete(outcome)
+      _ <- temporal.whenA(!completed)(
+        // This case is less common but good to handle - means the deferred was already completed
+        // (e.g., if the request was canceled and the deferred was completed with a cancellation signal).
+        logger.warn(s"Worker '$workerId' tried to complete Deferred but it was already completed."),
+      )
     } yield ()
 
-    processJob.foreverM
+    def safeProcessJob: F[Unit] =
+      processJob.handleErrorWith { e =>
+        logger.error(e)(
+          s"Worker '$workerId' loop encountered an unhandled error. Restarting worker.",
+        ) *>
+          temporal.sleep(1.second) *>
+          safeProcessJob
+      }
 
-  inline private val NumberOfWorkers = 16
+    safeProcessJob.foreverM
+
+  inline private val NumberOfWorkers = 32
 
   private def startWorkers[F[_]: { Temporal, Logger }](
       numWorkers: Int,
-      queue: Queue[F, Job],
+      queue: Queue[F, Job[F]],
       supervisor: Supervisor[F],
   ): F[Unit] =
-    (1 to numWorkers).toList
+    (0 until numWorkers).toVector
       .traverse_(workerId => supervisor.supervise(worker(workerId, queue)))
 
   // This is the number of redirects Ember will perform when a response
@@ -403,18 +500,18 @@ object MovieApp:
       .default[F]
       .withHost(serverHostIP)
       .withPort(serverHostPort)
-      .withShutdownTimeout(10.seconds)
+      .withShutdownTimeout(5.seconds)
       .withHttpApp(httpApp)
       .build
 
-  def run(@unused args: List[String]): IO[ExitCode] =
+  def run: IO[ExitCode] =
     type F = IO
 
-    ConfigSource.default.at("app-config").load[AppConfig] match {
-      case Left(failures) => IO.raiseError(ConfigReaderException[AppConfig](failures))
-      case Right(appConfig) =>
-        Slf4jLogger.create[F].flatMap { implicit logger =>
-          val coreResources: Resource[F, (Client[F], Supervisor[F], Transactor[F])] =
+    Slf4jLogger.create[F].flatMap { implicit logger =>
+      ConfigSource.default.at("app-config").load[AppConfig] match {
+        case Left(failures) => IO.raiseError(ConfigReaderException[AppConfig](failures))
+        case Right(appConfig) =>
+          val coreResources: Resource[F, (http4s.client.Client[F], Supervisor[F], Transactor[F])] =
             for {
               httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
               supervisor <- Supervisor[F]
@@ -429,6 +526,7 @@ object MovieApp:
 
             for {
               serverState <- LiveServerState.create[F]
+              _ <- startWorkers(NumberOfWorkers, serverState.jobQueue, supervisor)
               httpApp: HttpApp[F] = allRoutesComplete[F](
                 movieRepository,
                 externalApiClient,
@@ -436,7 +534,6 @@ object MovieApp:
                 serverState,
                 dsl,
               )
-              _ <- startWorkers(NumberOfWorkers, serverState.jobQueue, supervisor)
               httpServer <- createServerResource(serverHostIP, serverHostPort, httpApp)
                 .use(server =>
                   logger.info(
@@ -446,5 +543,5 @@ object MovieApp:
                 .as(ExitCode.Success)
             } yield httpServer
           }
-        }
+      }
     }
