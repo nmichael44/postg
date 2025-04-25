@@ -61,10 +61,10 @@ object HttpWorker:
 
     val processOneJob: F[Unit] = for {
       _ <- logger.info(s"$prompt: Waiting for work.")
-      (jobName, f, deferred) <- queue.take.map(j => (j.jobName, j.f, j.deferred))
+      (jobName, programBuilder, deferred) <- queue.take.map(j => (j.jobName, j.f, j.deferred))
       _ <- logger.info(s"$prompt: Starting to work on '$jobName'.")
       // Build the program
-      program <- buildProgram(prompt, jobName, deferred, f)
+      program <- buildProgram(prompt, jobName, deferred, programBuilder)
       // and now execute it
       outcome <- executeProgram(prompt, jobName, program)
       // finally, send the results back to the calling fiber.
