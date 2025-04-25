@@ -38,32 +38,28 @@ import pureconfig.ConfigSource
 object MovieApp:
   private sealed trait ServerState[F[_]] {
     val movieRequestCounts: Ref[F, Map[Long, Int]]
-    val jobQueue: Queue[F, Job[F]]
+    val jobQueue: Queue[F, HttpWorker.Job[F]]
   }
-
-  private final class Job[F[_]](
-      val f: () => F[Response[F]],
-      val d: Deferred[F, Either[Throwable, Response[F]]],
-  )
 
   private final val BoundedQueueCapacity: Int = 256
 
   private final case class LiveServerState[F[_]](
       movieRequestCounts: Ref[F, Map[Long, Int]],
-      jobQueue: Queue[F, Job[F]],
+      jobQueue: Queue[F, HttpWorker.Job[F]],
   ) extends ServerState[F]
 
   private object LiveServerState:
     def create[F[_]: Async]: F[ServerState[F]] =
       for {
         movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
-        jobQ <- Queue.bounded[F, Job[F]](BoundedQueueCapacity)
+        jobQ <- Queue.bounded[F, HttpWorker.Job[F]](BoundedQueueCapacity)
       } yield new LiveServerState[F](movieReqCounts, jobQ)
 
   // The approach we have taken here is to have the worker fiber build the "recipe" i.e.
   // construct the F[_] program that we are going to execute.  This is in the spirit
   // of keeping the http4s fiber work to a minimum and have the worker do all the work.
   private def enqueueJobAndWaitForResult[F[_]: { Async as async, Logger as logger }](
+      jobName: String,
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
       f: () => F[Response[F]],
@@ -72,13 +68,18 @@ object MovieApp:
 
     for {
       d <- Deferred[F, Either[Throwable, Response[F]]]
-      _ <- serverState.jobQueue.offer(Job(f, d))
+      _ <- logger.info(s"Queueing job '$jobName'.")
+      _ <- serverState.jobQueue.offer(HttpWorker.Job(jobName, f, d))
+      _ <- logger.info(s"Job '$jobName' queued. Waiting for response.")
       outcome <- d.get // Wait for the answer
+      _ <- logger.info(s"Job '$jobName': Response received.")
       response <- outcome match {
-        case Right(resp) => async.pure(resp)
+        case Right(resp) =>
+          logger.info(s"Job '$jobName': Successful response.") *>
+            async.pure(resp)
         case Left(e) =>
-          // Handle the error, e.g., return an InternalServerError response
-          logger.error(e)("Job failed") *> dsl.InternalServerError()
+          logger.error(e)(s"Job '$jobName' failed.  Returning internal server error.") *>
+            dsl.InternalServerError()
       }
     } yield response
   }
@@ -93,6 +94,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "getDirectorsDetailsByName",
       serverState,
       dsl,
       () =>
@@ -118,6 +120,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "getDirectorDetails",
       serverState,
       dsl,
       () =>
@@ -140,6 +143,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "getActorDetails",
       serverState,
       dsl,
       () =>
@@ -191,6 +195,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "getMoviesByDirectorId",
       serverState,
       dsl,
       () =>
@@ -210,6 +215,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "getMovieById",
       serverState,
       dsl,
       () =>
@@ -232,6 +238,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "getMovieByIdWithCounting",
       serverState,
       dsl,
       () =>
@@ -263,6 +270,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "getContentOfFileName",
       serverState,
       dsl,
       () =>
@@ -287,6 +295,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "getContentOfFileNameExplicit",
       serverState,
       dsl,
       () =>
@@ -318,6 +327,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "readTwoFilesInParallel",
       serverState,
       dsl,
       () =>
@@ -343,6 +353,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "fetchCompanyData",
       serverState,
       dsl,
       () =>
@@ -360,6 +371,7 @@ object MovieApp:
     import dsl.*
 
     enqueueJobAndWaitForResult(
+      "fetchJasonObject",
       serverState,
       dsl,
       () =>
@@ -377,13 +389,12 @@ object MovieApp:
   private def allRoutes[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
       apiClient: ExternalApiClient[F],
-      supervisor: Supervisor[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpRoutes[F] =
     import dsl.*
 
-    HttpRoutes.of[F] {
+    HttpRoutes.of[F]:
       case req @ GET -> Root / "getDirectorsByName" :? firstNameOptionalQueryParamDecoderMatcher(
             firstName,
           ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>
@@ -410,16 +421,14 @@ object MovieApp:
         fetchCompanyData(companyName, apiClient, serverState, dsl)
       case GET -> Root / "getJsonObject" =>
         fetchJasonObject(apiClient, serverState, dsl)
-    }
 
   private def allRoutesComplete[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
       apiClient: ExternalApiClient[F],
-      supervisor: Supervisor[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
-    allRoutes[F](mr, apiClient, supervisor, serverState, dsl).orNotFound
+    allRoutes[F](mr, apiClient, serverState, dsl).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
       allowedParams: Set[String],
@@ -444,48 +453,15 @@ object MovieApp:
       case (_, None) => throw new AssertionError(s"Illegal ServerHostPort: '$port'.")
     }
 
-  private def worker[F[_]: { Temporal as temporal, Logger as logger }](
-      workerId: Int,
-      queue: Queue[F, Job[F]],
-  ): F[Nothing] =
-    val processJob: F[Unit] = for {
-      _ <- logger.info(s"Worker '$workerId' waiting for work.")
-      job <- queue.take
-      _ <- logger.info(s"Worker '$workerId' starting to work.")
-      outcome <- job.f().attempt
-      _ <- outcome match {
-        case Right(_) => logger.info(s"Worker '$workerId' completed job successfully.")
-        case Left(e) => logger.error(e)(s"Worker '$workerId' job failed with error.")
-      }
-      _ <- logger.info(s"Worker '$workerId': Sending results back...")
-      completed <- job.d.complete(outcome)
-      _ <- temporal.whenA(!completed)(
-        // This case is less common but good to handle - means the deferred was already completed
-        // (e.g., if the request was canceled and the deferred was completed with a cancellation signal).
-        logger.warn(s"Worker '$workerId' tried to complete Deferred but it was already completed."),
-      )
-    } yield ()
-
-    def safeProcessJob: F[Unit] =
-      processJob.handleErrorWith { e =>
-        logger.error(e)(
-          s"Worker '$workerId' loop encountered an unhandled error. Restarting worker.",
-        ) *>
-          temporal.sleep(1.second) *>
-          safeProcessJob
-      }
-
-    safeProcessJob.foreverM
-
   inline private val NumberOfWorkers = 32
 
-  private def startWorkers[F[_]: { Temporal, Logger }](
+  private def startWorkers[F[_]: { Async, Logger }](
       numWorkers: Int,
-      queue: Queue[F, Job[F]],
+      queue: Queue[F, HttpWorker.Job[F]],
       supervisor: Supervisor[F],
   ): F[Unit] =
     (0 until numWorkers).toVector
-      .traverse_(workerId => supervisor.supervise(worker(workerId, queue)))
+      .traverse_(workerId => supervisor.supervise(HttpWorker.worker(workerId, queue)))
 
   // This is the number of redirects Ember will perform when a response
   // specifies that a redirection.
@@ -530,7 +506,6 @@ object MovieApp:
               httpApp: HttpApp[F] = allRoutesComplete[F](
                 movieRepository,
                 externalApiClient,
-                supervisor,
                 serverState,
                 dsl,
               )
