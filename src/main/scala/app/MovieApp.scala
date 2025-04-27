@@ -424,7 +424,7 @@ object MovieApp:
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
-    HttpRoutes.of[F](routes[F](mr, apiClient, serverState, dsl).orNotFound)
+    HttpRoutes.of[F](routes[F](mr, apiClient, serverState, dsl)).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
       allowedParams: Set[String],
