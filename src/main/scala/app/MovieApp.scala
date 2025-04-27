@@ -12,6 +12,7 @@ import java.nio.file.Paths
 import scala.concurrent.duration.*
 import scala.io.Source
 
+import app.{Utils => U}
 import app.AppConfig.AppConfig
 import app.MovieDbModel.DirectorPath
 import com.comcast.ip4s.{Ipv4Address, Port}
@@ -68,17 +69,17 @@ object MovieApp:
 
     for {
       d <- Deferred[F, Either[Throwable, Response[F]]]
-      _ <- logger.info(s"Queueing job '$jobName'.")
+      _ <- U.logi(s"Queueing job '$jobName'.")
       _ <- serverState.jobQueue.offer(HttpWorker.Job(jobName, programBuilder, d))
-      _ <- logger.info(s"Job '$jobName' queued. Waiting for response.")
+      _ <- U.logi(s"Job '$jobName' queued. Waiting for response.")
       outcome <- d.get // Wait for the answer
-      _ <- logger.info(s"Job '$jobName': Response received.")
+      _ <- U.logi(s"Job '$jobName': Response received.")
       response <- outcome match {
         case Right(resp) =>
-          logger.info(s"Job '$jobName': Successful response.") *>
+          U.logi(s"Job '$jobName': Successful response.") *>
             async.pure(resp)
         case Left(e) =>
-          logger.error(e)(s"Job '$jobName' failed.  Returning internal server error.") *>
+          U.loge(e, s"Job '$jobName' failed.  Returning internal server error.") *>
             dsl.InternalServerError()
       }
     } yield response
@@ -105,7 +106,7 @@ object MovieApp:
                 directorPath.firstName,
                 directorPath.lastName,
               )
-              _ <- logger.info("Fetching directors details")
+              _ <- U.logi("Fetching directors details")
               response <- Ok(directorsDetails.asJson)
             } yield response
           },
@@ -126,7 +127,7 @@ object MovieApp:
       () =>
         for {
           directorDetailsMap <- mr.getDirectorDetails(NonEmptyVector.one(directorId))
-          _ <- logger.info("Fetching director details")
+          _ <- U.logi("Fetching director details")
           response <- directorDetailsMap
             .get(directorId)
             .map(directorDetails => Ok(directorDetails.asJson))
@@ -149,7 +150,7 @@ object MovieApp:
       () =>
         for {
           actorDetailsMap <- mr.getActorDetails(NonEmptyVector.one(actorId))
-          _ <- logger.info(s"Fetching actor details for ID: $actorId")
+          _ <- U.logi(s"Fetching actor details for ID: $actorId")
           response <- actorDetailsMap
             .get(actorId)
             .map(actorDetails => Ok(actorDetails.asJson))
@@ -201,7 +202,7 @@ object MovieApp:
       () =>
         for {
           moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
-          _ <- logger.info(s"Fetching movies for director ID: $directorId")
+          _ <- U.logi(s"Fetching movies for director ID: $directorId")
           response <- Ok(moviesMap.getOrElse(directorId, Seq.empty).asJson)
         } yield response,
     )
@@ -221,7 +222,7 @@ object MovieApp:
       () =>
         for {
           movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
-          _ <- logger.info(s"Fetching movie details for ID: $movieId")
+          _ <- U.logi(s"Fetching movie details for ID: $movieId")
           response <- movieDetailsMap
             .get(movieId)
             .map(movie => Ok(movie.asJson))
@@ -243,7 +244,7 @@ object MovieApp:
       dsl,
       () =>
         for {
-          _ <- logger.info(
+          _ <- U.logi(
             s"Fetching movie details for ID: $movieId and incrementing counter count",
           )
           movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
@@ -255,7 +256,7 @@ object MovieApp:
                   val newCounts = counts.updatedWith(movieId)(_.fold(1)(_ + 1).some)
                   (newCounts, newCounts(movieId))
                 }
-                _ <- logger.info(s"Counter now is $newCountForMovie")
+                _ <- U.logi(s"Counter now is $newCountForMovie")
                 okResponse <- Ok(movie.asJson)
               } yield okResponse
             }
@@ -275,7 +276,7 @@ object MovieApp:
       dsl,
       () =>
         for {
-          _ <- logger.info(s"Asked to read file: '$fileName'.")
+          _ <- U.logi(s"Asked to read file: '$fileName'.")
           res <- fs2.io.file.Files
             .forAsync[F]
             .readAll(fs2.io.file.Path(fileName)) // Read file as Stream[IO, Byte]
@@ -300,7 +301,7 @@ object MovieApp:
       dsl,
       () =>
         for {
-          _ <- logger.info(s"Asked to read file explicitly: '$fileName'.")
+          _ <- U.logi(s"Asked to read file explicitly: '$fileName'.")
           res <- readFileContent(Paths.get(fileName)).use(c => Ok(Async[F].pure(c)))
         } yield res,
     )
@@ -332,9 +333,9 @@ object MovieApp:
       dsl,
       () =>
         for {
-          _ <- logger.info(s"Reading the two files in parallel.")
-          _ <- logger.info(s"FileName1 = '$fileName1'")
-          _ <- logger.info(s"FileName2 = '$fileName2'")
+          _ <- U.logi(s"Reading the two files in parallel.")
+          _ <- U.logi(s"FileName1 = '$fileName1'")
+          _ <- U.logi(s"FileName2 = '$fileName2'")
           res <- Ok(
             (
               readFileContent(Paths.get(fileName1)).use(Async[F].pure),
@@ -376,7 +377,7 @@ object MovieApp:
       dsl,
       () =>
         for {
-          _ <- logger.info("Fetching some json object recursively.")
+          _ <- U.logi("Fetching some json object recursively.")
           obj <- apiClient.fetchAsJson[MovieDbModel.Movie](
             Uri.unsafeFromString("http://127.0.0.1:8080/getMovieById/0"),
           )
@@ -384,43 +385,38 @@ object MovieApp:
         } yield res,
     )
 
-  // Example call:
-  // http://127.0.0.1:8080/getDirector/2
-  private def allRoutes[F[_]: { Async, Logger }](
+  private def routes[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
       apiClient: ExternalApiClient[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
-  ): HttpRoutes[F] =
-    import dsl.*
-
-    HttpRoutes.of[F]:
-      case req @ GET -> Root / "getDirectorsByName" :? firstNameOptionalQueryParamDecoderMatcher(
-            firstName,
-          ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>
-        getDirectorsDetailsByName(req, mr, serverState, DirectorPath(firstName, lastName), dsl)
-      case GET -> Root / "getDirector" / LongVar(directorId) =>
-        getDirectorDetails(mr, serverState, directorId, dsl)
-      case GET -> Root / "getActor" / LongVar(actorId) =>
-        getActorDetails(mr, serverState, actorId, dsl)
-      case GET -> Root / "getMoviesByDirector" / LongVar(directorId) =>
-        getMoviesByDirectorId(mr, serverState, directorId, dsl)
-      case GET -> Root / "getMovieById" / LongVar(movieId) =>
-        getMovieById(mr, serverState, movieId, dsl)
-      case GET -> Root / "getMovieByIdWithCounting" / LongVar(movieId) =>
-        getMovieByIdWithCounting(mr, movieId, serverState, dsl)
-      case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
-        getContentOfFileName(fileName, serverState, dsl)
-      case GET -> Root / "getFileExplicit" :? fileNameQueryParamDecoderMatcher(fileName) =>
-        getContentOfFileNameExplicit(fileName, serverState, dsl)
-      case GET -> Root / "readTwoFilesInParallel" :? fileName1QueryParamDecoderMatcher(
-            fileName1,
-          ) +& fileName2QueryParamDecoderMatcher(fileName2) =>
-        readTwoFilesInParallel(fileName1, fileName2, serverState, dsl)
-      case GET -> Root / "fetchCompanyData" / companyName =>
-        fetchCompanyData(companyName, apiClient, serverState, dsl)
-      case GET -> Root / "getJsonObject" =>
-        fetchJasonObject(apiClient, serverState, dsl)
+  ): PartialFunction[Request[F], F[Response[F]]] =
+    case req @ GET -> Root / "getDirectorsByName" :? firstNameOptionalQueryParamDecoderMatcher(
+          firstName,
+        ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>
+      getDirectorsDetailsByName(req, mr, serverState, DirectorPath(firstName, lastName), dsl)
+    case GET -> Root / "getDirector" / LongVar(directorId) =>
+      getDirectorDetails(mr, serverState, directorId, dsl)
+    case GET -> Root / "getActor" / LongVar(actorId) =>
+      getActorDetails(mr, serverState, actorId, dsl)
+    case GET -> Root / "getMoviesByDirector" / LongVar(directorId) =>
+      getMoviesByDirectorId(mr, serverState, directorId, dsl)
+    case GET -> Root / "getMovieById" / LongVar(movieId) =>
+      getMovieById(mr, serverState, movieId, dsl)
+    case GET -> Root / "getMovieByIdWithCounting" / LongVar(movieId) =>
+      getMovieByIdWithCounting(mr, movieId, serverState, dsl)
+    case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
+      getContentOfFileName(fileName, serverState, dsl)
+    case GET -> Root / "getFileExplicit" :? fileNameQueryParamDecoderMatcher(fileName) =>
+      getContentOfFileNameExplicit(fileName, serverState, dsl)
+    case GET -> Root / "readTwoFilesInParallel" :? fileName1QueryParamDecoderMatcher(
+          fileName1,
+        ) +& fileName2QueryParamDecoderMatcher(fileName2) =>
+      readTwoFilesInParallel(fileName1, fileName2, serverState, dsl)
+    case GET -> Root / "fetchCompanyData" / companyName =>
+      fetchCompanyData(companyName, apiClient, serverState, dsl)
+    case GET -> Root / "getJsonObject" =>
+      fetchJasonObject(apiClient, serverState, dsl)
 
   private def allRoutesComplete[F[_]: { Async, Logger }](
       mr: MovieRepository[F],
@@ -428,7 +424,7 @@ object MovieApp:
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
-    allRoutes[F](mr, apiClient, serverState, dsl).orNotFound
+    HttpRoutes.of[F](routes[F](mr, apiClient, serverState, dsl).orNotFound)
 
   private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
       allowedParams: Set[String],
@@ -511,7 +507,7 @@ object MovieApp:
               )
               httpServer <- createServerResource(serverHostIP, serverHostPort, httpApp)
                 .use(server =>
-                  logger.info(
+                  U.logi(
                     s"Server started with base uri: '${server.baseUri.toString}'.",
                   ) *> Async[F].never,
                 )

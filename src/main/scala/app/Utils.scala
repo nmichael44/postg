@@ -6,6 +6,8 @@ import cats.syntax.all.*
 import java.nio.file.Paths
 import scala.io.Source
 
+import org.typelevel.log4cats.Logger
+
 object Utils:
   private def parseLine[F[_]: Async](line: String): F[(String, String)] =
     line.split("=", 2).toList match {
@@ -93,3 +95,9 @@ object Utils:
       .fromAutoCloseable(Async[F].blocking(Source.fromFile(Paths.get(path).toFile)))
       .evalMap(source => Async[F].blocking(source.mkString))
       .evalMap(parseDatabaseConfig[F])
+
+  def logi[F[_]: Logger as logger](s: String): F[Unit] =
+    logger.info(s)
+
+  def loge[F[_]: Logger as logger](e: Throwable, s: String): F[Unit] =
+    logger.error(e)(s)
