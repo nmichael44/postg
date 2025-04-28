@@ -52,7 +52,7 @@ object MovieApp:
       for {
         movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
         jobQ <- Queue.bounded[F, HttpWorker.Job[F]](BoundedQueueCapacity)
-      } yield new LiveServerState[F](movieReqCounts, jobQ)
+      } yield LiveServerState[F](movieReqCounts, jobQ)
 
   // The approach we have taken here is to have the worker fiber build the "recipe" i.e.
   // construct the F[_] program that we are going to execute.  This is in the spirit
@@ -443,8 +443,8 @@ object MovieApp:
 
     (Ipv4Address.fromString(host), Port.fromInt(port)) match {
       case (Some(ipv4Address), Some(port)) => (ipv4Address, port)
-      case (None, _) => throw new AssertionError(s"Illegal ServerHostIP: '$host'.")
-      case (_, None) => throw new AssertionError(s"Illegal ServerHostPort: '$port'.")
+      case (None, _) => throw AssertionError(s"Illegal ServerHostIP: '$host'.")
+      case (_, None) => throw AssertionError(s"Illegal ServerHostPort: '$port'.")
     }
 
   inline private val NumberOfWorkers = 32

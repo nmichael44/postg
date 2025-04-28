@@ -14,14 +14,14 @@ object Utils:
       case key :: value :: Nil => Async[F].pure(key.toLowerCase, value)
       case _ =>
         Async[F].raiseError(
-          new IllegalArgumentException(
+          IllegalArgumentException(
             s"Invalid config line: '$line'. Expected 'key=value' format.",
           ),
         )
     }
 
   private def mkException(field: String): IllegalArgumentException =
-    new IllegalArgumentException(s"Missing or invalid field '$field'")
+    IllegalArgumentException(s"Missing or invalid field '$field'")
 
   private final val HostKey = "Host"
   private final val PortKey = "Port"

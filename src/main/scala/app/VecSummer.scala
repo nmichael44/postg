@@ -36,7 +36,7 @@ object VecSummer:
         outcomes <- fibers.parTraverse(_.join)
         results <- outcomes.traverse {
           case Outcome.Succeeded(s) => s
-          case _ => IO.raiseError(new AssertionError("Invalid outcome"))
+          case _ => IO.raiseError(AssertionError("Invalid outcome"))
         }
       } yield results.sum
 

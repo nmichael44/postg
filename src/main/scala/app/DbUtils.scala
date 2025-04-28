@@ -103,9 +103,9 @@ object DbUtils:
     }
   }
 
-  private val rnd = new Random
+  private val rnd: Random = Random
 
-  def generateRandomString(minLength: Int, maxLength: Int): String = {
+  private def generateRandomString(minLength: Int, maxLength: Int): String = {
     val length = rnd.nextInt(maxLength - minLength + 1) + minLength
     rnd.shuffle('a' to 'z').view.take(length).mkString
   }

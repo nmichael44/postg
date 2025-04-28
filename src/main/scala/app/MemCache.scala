@@ -46,7 +46,7 @@ object MemCache:
     for {
       r <- Ref.of(TreeMap.empty[K, (V, Option[Instant])])
       cleanupFiber <- startWorker(r, logger)
-    } yield new MemCache(r, cleanupFiber)
+    } yield MemCache(r, cleanupFiber)
   }
 
   private val CleanupInterval: Duration = 1.minutes

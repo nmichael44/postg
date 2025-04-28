@@ -25,7 +25,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  private val dummyMovie = MovieDbModel.Movie(1L, "Test Movie", 2023)
 //
 //  "getDirectorsDetailsFromDb" should "return a vector of directors when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] =
@@ -42,7 +42,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return an empty vector when no directors are found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Vector.empty)
@@ -57,7 +57,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getDirectorDetailsFromDb" should "return Some(Director) when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] =
@@ -72,7 +72,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return None when not found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(None)
@@ -85,7 +85,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getDirectorsDetailsByName" should "return Ok with directors details when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Vector(dummyDirector))
@@ -111,7 +111,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return Ok with empty array when no directors are found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Vector.empty)
@@ -135,7 +135,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return BadRequest for extra query parameters" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Vector.empty)
@@ -160,7 +160,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getDirectorDetails" should "return Ok with director details when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Some(dummyDirector))
@@ -178,7 +178,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return BadRequest when director is not found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(None)
@@ -194,7 +194,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getActorDetailsFromDb" should "return Some(Actor) when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] =
@@ -209,7 +209,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return None when actor is not found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(None)
@@ -222,7 +222,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getActorDetails" should "return Ok with actor details when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Some(dummyActor))
@@ -240,7 +240,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return BadRequest when actor is not found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(None)
@@ -256,7 +256,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getMoviesByDirectorIdFromDb" should "return a vector of movies when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] =
@@ -271,7 +271,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return an empty vector when no movies are found for the director" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Vector.empty)
@@ -284,7 +284,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getMoviesByDirectorId" should "return Ok with movies when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Vector(dummyMovie))
@@ -302,7 +302,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return Ok with empty array when no movies found for director" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(Vector.empty)
@@ -318,7 +318,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getMoviesByDirectorNameFromDb" should "return a JSON string with director and movies when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(
@@ -341,7 +341,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return an empty JSON array string when no directors are found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure("[]")
@@ -356,7 +356,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  "getMoviesByDirectorName" should "return Ok with director and movies in JSON when found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure(
@@ -388,7 +388,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return Ok with empty array when no directors found" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure("[]")
@@ -412,7 +412,7 @@ final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  }
 //
 //  it should "return BadRequest for extra query parameters in getMoviesByDirectorName" in {
-//    val mockXa = new Transactor[IO] {
+//    val mockXa = Transactor[IO] {
 //      override def rawTransact[A](fa: IO[A]): IO[A] = fa
 //      override def rawTransact[A](fa: IO[A], executionContext: ExecutionContext): IO[A] = fa
 //      override def transact[A](fa: ConnectionIO[A]): IO[A] = IO.pure("[]")

@@ -41,5 +41,5 @@ object Switches:
   def eval2(i: Instr): Int =
     DispatchMap.get(i.getClass) match {
       case Some(f) => f(i)
-      case None => throw new AssertionError("Unimplemented instruction.")
+      case None => throw AssertionError("Unimplemented instruction.")
     }
