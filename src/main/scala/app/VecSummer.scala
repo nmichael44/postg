@@ -1,7 +1,7 @@
 package app
 
 import cats.effect.{ExitCode, IO}
-import cats.effect.kernel.{Fiber, Outcome}
+import cats.effect.kernel.Outcome
 import cats.syntax.all.*
 
 import org.typelevel.log4cats.Logger
