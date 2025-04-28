@@ -12,9 +12,11 @@ import java.nio.file.Paths
 import scala.concurrent.duration.*
 import scala.io.Source
 
-import app.{Utils => U}
+import app.services.{ExternalApiClientService, MovieRepositoryService}
+import app.serviceslive.{ExternalApiClientServiceLive, MovieRepositoryLive}
 import app.AppConfig.AppConfig
 import app.MovieDbModel.DirectorPath
+import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
 import doobie.util.transactor.Transactor
 import fs2.io.net.Network
@@ -35,13 +37,9 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
 import pureconfig.error.ConfigReaderException
 import pureconfig.ConfigSource
+import services.ServerState
 
 object MovieApp:
-  private sealed trait ServerState[F[_]] {
-    val movieRequestCounts: Ref[F, Map[Long, Int]]
-    val jobQueue: Queue[F, HttpWorker.Job[F]]
-  }
-
   private final val BoundedQueueCapacity: Int = 256
 
   private final case class LiveServerState[F[_]](
@@ -87,7 +85,7 @@ object MovieApp:
 
   private def getDirectorsDetailsByName[F[_]: { Async, Logger as logger }](
       req: Request[F],
-      mr: MovieRepository[F],
+      mr: MovieRepositoryService[F],
       serverState: ServerState[F],
       directorPath: DirectorPath,
       dsl: Http4sDsl[F],
@@ -113,7 +111,7 @@ object MovieApp:
     )
 
   private def getDirectorDetails[F[_]: { Async, Logger as logger }](
-      mr: MovieRepository[F],
+      mr: MovieRepositoryService[F],
       serverState: ServerState[F],
       directorId: Long,
       dsl: Http4sDsl[F],
@@ -136,7 +134,7 @@ object MovieApp:
     )
 
   private def getActorDetails[F[_]: { Async, Logger as logger }](
-      mr: MovieRepository[F],
+      mr: MovieRepositoryService[F],
       serverState: ServerState[F],
       actorId: Long,
       dsl: Http4sDsl[F],
@@ -180,7 +178,7 @@ object MovieApp:
       extends QueryParamDecoderMatcher[String]("fileName2")
 
   private def getMoviesByDirectorIdFromDb[F[_]: MonadCancelThrow](
-      mr: MovieRepository[F],
+      mr: MovieRepositoryService[F],
       directorId: Long,
       serverState: ServerState[F],
   ): F[Seq[MovieDbModel.Movie]] =
@@ -188,7 +186,7 @@ object MovieApp:
       .map(m => m.getOrElse(directorId, Seq.empty))
 
   private def getMoviesByDirectorId[F[_]: { Async, Logger as logger }](
-      mr: MovieRepository[F],
+      mr: MovieRepositoryService[F],
       serverState: ServerState[F],
       directorId: Long,
       dsl: Http4sDsl[F],
@@ -208,7 +206,7 @@ object MovieApp:
     )
 
   private def getMovieById[F[_]: { Async, Logger as logger }](
-      mr: MovieRepository[F],
+      mr: MovieRepositoryService[F],
       serverState: ServerState[F],
       movieId: Long,
       dsl: Http4sDsl[F],
@@ -231,7 +229,7 @@ object MovieApp:
     )
 
   private def getMovieByIdWithCounting[F[_]: { Async, Logger as logger }](
-      mr: MovieRepository[F],
+      mr: MovieRepositoryService[F],
       movieId: Long,
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
@@ -347,7 +345,7 @@ object MovieApp:
 
   private def fetchCompanyData[F[_]: { Async, Logger }](
       companyName: String,
-      apiClient: ExternalApiClient[F],
+      apiClient: ExternalApiClientService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
@@ -365,7 +363,7 @@ object MovieApp:
     )
 
   private def fetchJasonObject[F[_]: { Async, Logger as logger }](
-      apiClient: ExternalApiClient[F],
+      apiClient: ExternalApiClientService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
@@ -386,8 +384,8 @@ object MovieApp:
     )
 
   private def routes[F[_]: { Async, Logger }](
-      mr: MovieRepository[F],
-      apiClient: ExternalApiClient[F],
+      mr: MovieRepositoryService[F],
+      apiClient: ExternalApiClientService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): PartialFunction[Request[F], F[Response[F]]] =
@@ -419,8 +417,8 @@ object MovieApp:
       fetchJasonObject(apiClient, serverState, dsl)
 
   private def allRoutesComplete[F[_]: { Async, Logger }](
-      mr: MovieRepository[F],
-      apiClient: ExternalApiClient[F],
+      mr: MovieRepositoryService[F],
+      apiClient: ExternalApiClientService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
@@ -491,8 +489,8 @@ object MovieApp:
             } yield (httpClient, supervisor, xa)
 
           coreResources.use { (httpClient, supervisor, xa) =>
-            val externalApiClient = ExternalApiClientImpl.create[F](httpClient)
-            val movieRepository: MovieRepository[F] = MovieRepositoryDb.create(xa)
+            val externalApiClient = ExternalApiClientServiceLive.create[F](httpClient)
+            val movieRepository: MovieRepositoryService[F] = MovieRepositoryLive.create(xa)
             val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
             val dsl: Http4sDsl[F] = Http4sDsl[F]
 

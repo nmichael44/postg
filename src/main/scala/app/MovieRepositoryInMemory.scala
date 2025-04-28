@@ -5,9 +5,10 @@ import cats.effect.Async
 
 import java.time.LocalDate
 
+import app.services.MovieRepositoryService
 import app.ImplicitConversions.*
 
-final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepository[F]:
+final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepositoryService[F]:
   private val Directors: Map[Long, MovieDbModel.Director] = Map(
     0L -> MovieDbModel.Director(0L, "Steven", "Spielberg", LocalDate.of(1965, 5, 1)),
     1L -> MovieDbModel.Director(1L, "Neo", "Michael", LocalDate.of(1970, 4, 19)),

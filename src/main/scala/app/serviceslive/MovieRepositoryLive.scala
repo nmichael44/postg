@@ -1,14 +1,17 @@
-package app
+package app.serviceslive
 
 import cats.data.NonEmptyVector
 import cats.effect.Async
 
+import app.services.MovieRepositoryService
+import app.MovieDbModel
 import doobie.implicits.*
 import doobie.postgres.implicits.*
 import doobie.util.transactor.Transactor
 import fs2.Stream.*
 
-final class MovieRepositoryDb[F[_]: Async](xa: Transactor[F]) extends MovieRepository[F]:
+private final class MovieRepositoryLive[F[_]: Async] private (xa: Transactor[F])
+    extends MovieRepositoryService[F]:
   override def getDirectorsDetails(
       firstName: Option[String],
       lastName: Option[String],
@@ -85,6 +88,6 @@ final class MovieRepositoryDb[F[_]: Async](xa: Transactor[F]) extends MovieRepos
       .lastOrError
       .transact(xa)
 
-object MovieRepositoryDb:
-  def create[F[_]: Async](xa: Transactor[F]): MovieRepository[F] =
-    new MovieRepositoryDb[F](xa)
+object MovieRepositoryLive:
+  def create[F[_]: Async](xa: Transactor[F]): MovieRepositoryService[F] =
+    MovieRepositoryLive[F](xa)

@@ -1,15 +1,15 @@
-package app
+package app.serviceslive
 
 import cats.effect.Async
 
-import app.ExternalApiClientImpl.doRequest
+import app.services.ExternalApiClientService
 import io.circe.Decoder
 import org.http4s.{Method, Request, Uri}
 import org.http4s.circe.jsonOf
 import org.http4s.client.Client
 
-final class ExternalApiClientImpl[F[_]: Async] private (client: Client[F])
-    extends ExternalApiClient[F]:
+private final class ExternalApiClientServiceLive[F[_]: Async as async] private (client: Client[F])
+    extends ExternalApiClientService[F]:
   override def fetchUri(uri: Uri): F[String] =
     val request: Request[F] = Request[F](Method.GET, uri)
     doRequest(client, request)
@@ -22,16 +22,16 @@ final class ExternalApiClientImpl[F[_]: Async] private (client: Client[F])
   def fetchAsJson[A: Decoder](uri: org.http4s.Uri): F[A] =
     client.expect[A](uri)(jsonOf[F, A])
 
-object ExternalApiClientImpl:
-  def create[F[_]: Async](client: Client[F]): ExternalApiClient[F] =
-    new ExternalApiClientImpl[F](client)
-
-  private def doRequest[F[_]: Async](client: Client[F], request: Request[F]): F[String] =
+  private def doRequest(client: Client[F], request: Request[F]): F[String] =
     client.run(request).use { response =>
       if (response.status.isSuccess)
         response.bodyText.compile.string
       else
-        Async[F].raiseError(
-          new RuntimeException(s"External service call failed with status: ${response.status}."),
+        async.raiseError(
+          RuntimeException(s"External service call failed with status: ${response.status}."),
         )
     }
+
+object ExternalApiClientServiceLive:
+  def create[F[_]: Async](client: Client[F]): ExternalApiClientService[F] =
+    ExternalApiClientServiceLive[F](client)

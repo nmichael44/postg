@@ -1,9 +1,11 @@
-package app
+package app.services
 
 import cats.data.NonEmptyVector
 import cats.effect.Async
 
-trait MovieRepository[F[_]]:
+import app.MovieDbModel
+
+trait MovieRepositoryService[F[_]]:
   def getDirectorsDetails(
       firstName: Option[String],
       lastName: Option[String],
