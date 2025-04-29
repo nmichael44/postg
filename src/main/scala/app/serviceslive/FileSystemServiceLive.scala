@@ -7,9 +7,9 @@ import cats.implicits.*
 
 import scala.io.Source
 
-import app.services.FileService
+import app.services.FileSystemService
 
-private final class FileServiceLive[F[_]: Async as async] private extends FileService[F]:
+private final class FileSystemServiceLive[F[_]: Async as async] private extends FileSystemService[F]:
   def readFileContent(fileName: String): F[String] =
     readFileContentAux(fileName).use(async.pure)
 
@@ -24,5 +24,5 @@ private final class FileServiceLive[F[_]: Async as async] private extends FileSe
       .fromAutoCloseable(async.blocking(Source.fromFile(path)))
       .evalMap(source => async.blocking(source.mkString))
 
-object FileServiceLive:
-  def create[F[_]: Async]: FileService[F] = FileServiceLive[F]
+object FileSystemServiceLive:
+  def create[F[_]: Async]: FileSystemService[F] = FileSystemServiceLive[F]

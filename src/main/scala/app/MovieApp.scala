@@ -12,8 +12,7 @@ import java.nio.file.Paths
 import scala.concurrent.duration.*
 import scala.io.Source
 
-import app.services.{ExternalApiClientService, MovieRepositoryService}
-import app.serviceslive.{ExternalApiClientServiceLive, MovieRepositoryLive}
+import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive}
 import app.AppConfig.AppConfig
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
@@ -37,7 +36,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
 import pureconfig.error.ConfigReaderException
 import pureconfig.ConfigSource
-import services.ServerState
+import services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState}
 
 object MovieApp:
   private final val BoundedQueueCapacity: Int = 256
@@ -263,6 +262,7 @@ object MovieApp:
 
   private def getContentOfFileName[F[_]: { Async, Logger as logger }](
       fileName: String,
+      fileSystemService: FileSystemService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
@@ -275,32 +275,10 @@ object MovieApp:
       () =>
         for {
           _ <- U.logi(s"Asked to read file: '$fileName'.")
-          res <- fs2.io.file.Files
-            .forAsync[F]
-            .readAll(fs2.io.file.Path(fileName)) // Read file as Stream[IO, Byte]
-            .through(fs2.text.utf8.decode) // Decode to UTF-8 string
-            .compile
-            .string
+          res <- fileSystemService
+            .readFileContent(fileName)
             .flatMap(Ok(_))
-            .handleErrorWith(ex => BadRequest(s"Error reading file: ${ex.getMessage}"))
-        } yield res,
-    )
-
-  private def getContentOfFileNameExplicit[F[_]: { Async, Logger as logger }](
-      fileName: String,
-      serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
-    enqueueJobAndWaitForResult(
-      "getContentOfFileNameExplicit",
-      serverState,
-      dsl,
-      () =>
-        for {
-          _ <- U.logi(s"Asked to read file explicitly: '$fileName'.")
-          res <- readFileContent(Paths.get(fileName)).use(c => Ok(Async[F].pure(c)))
+            .handleErrorWith(e => BadRequest(s"Error reading file: ${e.getMessage}"))
         } yield res,
     )
 
@@ -320,6 +298,7 @@ object MovieApp:
   private def readTwoFilesInParallel[F[_]: { Async, Logger as logger }](
       fileName1: String,
       fileName2: String,
+      fileSystemService: FileSystemService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
@@ -334,12 +313,10 @@ object MovieApp:
           _ <- U.logi(s"Reading the two files in parallel.")
           _ <- U.logi(s"FileName1 = '$fileName1'")
           _ <- U.logi(s"FileName2 = '$fileName2'")
-          res <- Ok(
-            (
-              readFileContent(Paths.get(fileName1)).use(Async[F].pure),
-              readFileContent(Paths.get(fileName2)).use(Async[F].pure),
-            ).parMapN((c1, c2) => c1 + c2),
-          )
+          res <- fileSystemService
+            .readTwoFilesInParallel(fileName1, fileName2)
+            .flatMap(Ok(_))
+            .handleErrorWith(e => BadRequest(s"Error reading files: ${e.getMessage}"))
         } yield res,
     )
 
@@ -386,6 +363,7 @@ object MovieApp:
   private def routes[F[_]: { Async, Logger }](
       mr: MovieRepositoryService[F],
       apiClient: ExternalApiClientService[F],
+      fileSystemService: FileSystemService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): PartialFunction[Request[F], F[Response[F]]] =
@@ -404,13 +382,11 @@ object MovieApp:
     case GET -> Root / "getMovieByIdWithCounting" / LongVar(movieId) =>
       getMovieByIdWithCounting(mr, movieId, serverState, dsl)
     case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
-      getContentOfFileName(fileName, serverState, dsl)
-    case GET -> Root / "getFileExplicit" :? fileNameQueryParamDecoderMatcher(fileName) =>
-      getContentOfFileNameExplicit(fileName, serverState, dsl)
+      getContentOfFileName(fileName, fileSystemService, serverState, dsl)
     case GET -> Root / "readTwoFilesInParallel" :? fileName1QueryParamDecoderMatcher(
           fileName1,
         ) +& fileName2QueryParamDecoderMatcher(fileName2) =>
-      readTwoFilesInParallel(fileName1, fileName2, serverState, dsl)
+      readTwoFilesInParallel(fileName1, fileName2, fileSystemService, serverState, dsl)
     case GET -> Root / "fetchCompanyData" / companyName =>
       fetchCompanyData(companyName, apiClient, serverState, dsl)
     case GET -> Root / "getJsonObject" =>
@@ -419,10 +395,11 @@ object MovieApp:
   private def allRoutesComplete[F[_]: { Async, Logger }](
       mr: MovieRepositoryService[F],
       apiClient: ExternalApiClientService[F],
+      fileService: FileSystemService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
-    HttpRoutes.of[F](routes[F](mr, apiClient, serverState, dsl)).orNotFound
+    HttpRoutes.of[F](routes[F](mr, apiClient, fileService, serverState, dsl)).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
       allowedParams: Set[String],
@@ -489,8 +466,11 @@ object MovieApp:
             } yield (httpClient, supervisor, xa)
 
           coreResources.use { (httpClient, supervisor, xa) =>
-            val externalApiClient = ExternalApiClientServiceLive.create[F](httpClient)
-            val movieRepository: MovieRepositoryService[F] = MovieRepositoryLive.create(xa)
+            val externalApiClientService: ExternalApiClientService[F] =
+              ExternalApiClientServiceLive.create[F](httpClient)
+            val movieRepositoryService: MovieRepositoryService[F] =
+              MovieRepositoryServiceLive.create(xa)
+            val fileService: FileSystemService[F] = FileSystemServiceLive.create
             val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
             val dsl: Http4sDsl[F] = Http4sDsl[F]
 
@@ -498,8 +478,9 @@ object MovieApp:
               serverState <- LiveServerState.create[F]
               _ <- startWorkers(NumberOfWorkers, serverState.jobQueue, supervisor)
               httpApp: HttpApp[F] = allRoutesComplete[F](
-                movieRepository,
-                externalApiClient,
+                movieRepositoryService,
+                externalApiClientService,
+                fileService,
                 serverState,
                 dsl,
               )

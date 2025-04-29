@@ -7,7 +7,7 @@ import cats.syntax.all.*
 import org.typelevel.log4cats.Logger
 
 object VecSummer:
-  private final val WorkersNumber = 16
+  inline private val WorkersNumber = 32
 
   private def sum(v: Array[Double], startIdx: Int, cnt: Int)(implicit
       logger: Logger[IO],
@@ -17,7 +17,7 @@ object VecSummer:
         var s: Double = 0.0
         for i <- startIdx until (startIdx + cnt) do s += v(i)
         s
-      }
+      }.flatTap(s => logger.info(s"Result was: $s"))
 
   private def summer(v: Array[Double])(implicit logger: Logger[IO]): IO[Double] =
     val len = v.length
@@ -27,14 +27,18 @@ object VecSummer:
     else
       val elemsPerThread = len / WorkersNumber
       val remainingElems = len % WorkersNumber
-
+      val WorkerM1 = WorkersNumber - 1
       val res: IO[Double] = for {
-        fibers <- (0 until WorkersNumber).toList.parTraverse { i =>
+        fibersMm1 <- (0 until WorkerM1).toVector.parTraverse { i =>
           val startIdx = i * elemsPerThread
-          val cnt =
-            if i == WorkersNumber - 1 then elemsPerThread + remainingElems else elemsPerThread
+          sum(v, startIdx, elemsPerThread).start
+        }
+        fiberN <- {
+          val startIdx = WorkerM1 * elemsPerThread
+          val cnt = elemsPerThread + remainingElems
           sum(v, startIdx, cnt).start
         }
+        fibers = fibersMm1 :+ fiberN
         outcomes <- fibers.parTraverse(_.join)
         results <- outcomes.traverse {
           case Outcome.Succeeded(s) => s
@@ -48,7 +52,7 @@ object VecSummer:
     for {
       _ <- logger.info("Creating the array")
       v <- IO.delay {
-        (0 until 100_000_100).map(_ => 0.5d).toArray
+        (0 until 100_000_102).map(_ => 0.5d).toArray
       }
       _ <- logger.info("Starting the summation")
       res <- summer(v)

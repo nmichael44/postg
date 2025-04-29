@@ -1,6 +1,6 @@
 package app.services
 
-trait FileService[F[_]]:
+trait FileSystemService[F[_]]:
   /**
    * Reads the entire content of a file into a String.
    *

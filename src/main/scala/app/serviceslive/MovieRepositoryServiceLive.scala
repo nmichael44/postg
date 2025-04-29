@@ -10,7 +10,7 @@ import doobie.postgres.implicits.*
 import doobie.util.transactor.Transactor
 import fs2.Stream.*
 
-private final class MovieRepositoryLive[F[_]: Async] private (xa: Transactor[F])
+private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transactor[F])
     extends MovieRepositoryService[F]:
   override def getDirectorsDetails(
       firstName: Option[String],
@@ -88,6 +88,6 @@ private final class MovieRepositoryLive[F[_]: Async] private (xa: Transactor[F])
       .lastOrError
       .transact(xa)
 
-object MovieRepositoryLive:
+object MovieRepositoryServiceLive:
   def create[F[_]: Async](xa: Transactor[F]): MovieRepositoryService[F] =
-    MovieRepositoryLive[F](xa)
+    MovieRepositoryServiceLive[F](xa)
