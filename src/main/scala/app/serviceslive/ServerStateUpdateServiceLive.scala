@@ -3,11 +3,11 @@ package app.serviceslive
 import cats.syntax.all.*
 import cats.Functor
 
-import app.services.MovieViewCounterService
+import app.services.ServerStateUpdateService
 import app.services.ServerState
 
-private final class MovieViewCounterServiceLive[F[_]: Functor] private (serverState: ServerState[F])
-    extends MovieViewCounterService[F]:
+private final class ServerStateUpdateServiceLive[F[_]: Functor] private(serverState: ServerState[F])
+    extends ServerStateUpdateService[F]:
   def incrementAndGet(movieId: Long): F[Int] =
     serverState.movieRequestCounts.modify { counts =>
       val newCounts = counts.updatedWith(movieId)(_.fold(1)(_ + 1).some)
@@ -20,6 +20,6 @@ private final class MovieViewCounterServiceLive[F[_]: Functor] private (serverSt
   def getAllCounts: F[Map[Long, Int]] =
     serverState.movieRequestCounts.get
 
-object MovieViewCounterServiceLive:
-  def create[F[_]: Functor](serverState: ServerState[F]): MovieViewCounterService[F] =
-    MovieViewCounterServiceLive[F](serverState)
+object ServerStateUpdateServiceLive:
+  def create[F[_]: Functor](serverState: ServerState[F]): ServerStateUpdateService[F] =
+    ServerStateUpdateServiceLive[F](serverState)

@@ -1,6 +1,6 @@
 package app.services
 
-trait MovieViewCounterService[F[_]]:
+trait ServerStateUpdateService[F[_]]:
   /**
    * Increments the view/access count for a specific movie ID and returns the new count.
    *

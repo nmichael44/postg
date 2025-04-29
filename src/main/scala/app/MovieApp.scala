@@ -2,17 +2,14 @@ package app
 
 import cats.data.NonEmptyVector
 import cats.effect.*
-import cats.effect.implicits.*
 import cats.effect.kernel.Async
 import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
-import cats.syntax.parallel.*
 
-import java.nio.file.Paths
 import scala.concurrent.duration.*
 import scala.io.Source
 
-import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive}
+import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.AppConfig
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
@@ -36,7 +33,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
 import pureconfig.error.ConfigReaderException
 import pureconfig.ConfigSource
-import services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState}
+import services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
 
 object MovieApp:
   private final val BoundedQueueCapacity: Int = 256
@@ -230,6 +227,7 @@ object MovieApp:
   private def getMovieByIdWithCounting[F[_]: { Async, Logger as logger }](
       mr: MovieRepositoryService[F],
       movieId: Long,
+      serverStateUpdateService: ServerStateUpdateService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): F[Response[F]] =
@@ -241,21 +239,16 @@ object MovieApp:
       dsl,
       () =>
         for {
-          _ <- U.logi(
-            s"Fetching movie details for ID: $movieId and incrementing counter count",
-          )
+          _ <- U.logi(s"Fetching movie details for ID: $movieId and incrementing counter count")
           movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
           response <- movieDetailsMap
             .get(movieId)
             .fold(BadRequest(s"Movie id: '$movieId' not found!")) { movie =>
               for {
-                newCountForMovie <- serverState.movieRequestCounts.modify { counts =>
-                  val newCounts = counts.updatedWith(movieId)(_.fold(1)(_ + 1).some)
-                  (newCounts, newCounts(movieId))
-                }
+                newCountForMovie <- serverStateUpdateService.incrementAndGet(movieId)
                 _ <- U.logi(s"Counter now is $newCountForMovie")
-                okResponse <- Ok(movie.asJson)
-              } yield okResponse
+                res <- Ok(movie.asJson)
+              } yield res
             }
         } yield response,
     )
@@ -353,10 +346,12 @@ object MovieApp:
       () =>
         for {
           _ <- U.logi("Fetching some json object recursively.")
-          obj <- apiClient.fetchAsJson[MovieDbModel.Movie](
-            Uri.unsafeFromString("http://127.0.0.1:8080/getMovieById/0"),
-          )
-          res <- Ok(obj.asJson)
+          obj <- apiClient
+            .fetchAsJson[MovieDbModel.Movie](
+              Uri.unsafeFromString("http://127.0.0.1:8080/getMovieById/0"),
+            )
+            .map(_.asJson)
+          res <- Ok(obj)
         } yield res,
     )
 
@@ -364,6 +359,7 @@ object MovieApp:
       mr: MovieRepositoryService[F],
       apiClient: ExternalApiClientService[F],
       fileSystemService: FileSystemService[F],
+      serverStateUpdateService: ServerStateUpdateService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): PartialFunction[Request[F], F[Response[F]]] =
@@ -380,7 +376,7 @@ object MovieApp:
     case GET -> Root / "getMovieById" / LongVar(movieId) =>
       getMovieById(mr, serverState, movieId, dsl)
     case GET -> Root / "getMovieByIdWithCounting" / LongVar(movieId) =>
-      getMovieByIdWithCounting(mr, movieId, serverState, dsl)
+      getMovieByIdWithCounting(mr, movieId, serverStateUpdateService, serverState, dsl)
     case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
       getContentOfFileName(fileName, fileSystemService, serverState, dsl)
     case GET -> Root / "readTwoFilesInParallel" :? fileName1QueryParamDecoderMatcher(
@@ -396,10 +392,13 @@ object MovieApp:
       mr: MovieRepositoryService[F],
       apiClient: ExternalApiClientService[F],
       fileService: FileSystemService[F],
+      serverStateUpdateService: ServerStateUpdateService[F],
       serverState: ServerState[F],
       dsl: Http4sDsl[F],
   ): HttpApp[F] =
-    HttpRoutes.of[F](routes[F](mr, apiClient, fileService, serverState, dsl)).orNotFound
+    HttpRoutes
+      .of[F](routes[F](mr, apiClient, fileService, serverStateUpdateService, serverState, dsl))
+      .orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
       allowedParams: Set[String],
@@ -471,16 +470,20 @@ object MovieApp:
             val movieRepositoryService: MovieRepositoryService[F] =
               MovieRepositoryServiceLive.create(xa)
             val fileService: FileSystemService[F] = FileSystemServiceLive.create
+
             val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
             val dsl: Http4sDsl[F] = Http4sDsl[F]
 
             for {
               serverState <- LiveServerState.create[F]
+              serverStateUpdateService = ServerStateUpdateServiceLive.create(serverState)
+
               _ <- startWorkers(NumberOfWorkers, serverState.jobQueue, supervisor)
               httpApp: HttpApp[F] = allRoutesComplete[F](
                 movieRepositoryService,
                 externalApiClientService,
                 fileService,
+                serverStateUpdateService,
                 serverState,
                 dsl,
               )
