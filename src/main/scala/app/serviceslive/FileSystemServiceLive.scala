@@ -9,7 +9,8 @@ import scala.io.Source
 
 import app.services.FileSystemService
 
-private final class FileSystemServiceLive[F[_]: Async as async] private extends FileSystemService[F]:
+private final class FileSystemServiceLive[F[_]: Async as async] private
+    extends FileSystemService[F]:
   def readFileContent(fileName: String): F[String] =
     readFileContentAux(fileName).use(async.pure)
 

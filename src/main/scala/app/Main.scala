@@ -26,7 +26,8 @@ object Main extends IOApp:
     implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 
     // VecSummer.run
-
+    // SquareLand.doIt()
+    // IO.pure(ExitCode.Success)
     MovieApp.run
 
 // Boo.Timing.doIt()

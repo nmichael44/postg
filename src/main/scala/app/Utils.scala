@@ -101,3 +101,5 @@ object Utils:
 
   def loge[F[_]: Logger as logger](e: Throwable, s: String): F[Unit] =
     logger.error(e)(s)
+
+  inline def castTo[A](a: Any): A = a.asInstanceOf[A]

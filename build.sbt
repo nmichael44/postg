@@ -1,6 +1,6 @@
 ThisBuild / version := "0.1.0-SNAPSHOT"
 
-ThisBuild / scalaVersion := "3.6.2"
+ThisBuild / scalaVersion := "3.6.4"
 
 lazy val postgresVersion = "42.7.5"
 lazy val logbackVersion = "1.5.18"

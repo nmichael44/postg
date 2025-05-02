@@ -9,7 +9,7 @@ import scala.concurrent.duration.{Duration, DurationInt}
 
 import org.typelevel.log4cats.Logger
 
-object SuperV:
+object CESupervisor:
   private def job[F[_]: { Temporal as temporal, Logger as logger }](
       fibName: String,
       d: Duration,

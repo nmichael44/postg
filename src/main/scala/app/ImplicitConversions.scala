@@ -1,8 +1,8 @@
 package app
 
+import cats.{Applicative, Functor}
 import cats.data.NonEmptyVector
 import cats.syntax.functor.*
-import cats.Functor
 
 import scala.collection.View
 
@@ -15,3 +15,8 @@ object ImplicitConversions:
   extension [F[_], G[_]: Functor, O](s: fs2.Stream.CompileOps[F, G, O])
     def theLast(using fs2.Compiler[F, G]): G[O] =
       s.last.map(_.get)
+
+  extension [F[_]: Applicative as app, A](b: Boolean)
+    inline def whenA(fa: F[A]): F[Unit] =
+      import cats.syntax.all.*
+      fa.whenA(b)(using app)
