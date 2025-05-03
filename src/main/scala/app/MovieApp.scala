@@ -9,6 +9,7 @@ import scala.concurrent.duration.*
 
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.AppConfig
+import app.ImplicitConversions.*
 import app.JobSpecs.{JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovieById, GetMovieByIdWithCounting, GetMoviesByDirectorId, ReadTwoFilesInParallel}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieByIdResult, MovieByIdWithCountingResult, MoviesByDirectorIdResult, TwoFilesInParallelResult}
@@ -82,7 +83,7 @@ object MovieApp:
       f: T => F[Response[F]],
   ): F[Response[F]] =
     import dsl.*
-    resEither.fold(_ => InternalServerError(), x => f(U.castTo[T](x)))
+    resEither.fold(_ => InternalServerError(), x => f(x.as[T]))
 
   private def getDirectorsDetailsByName[F[_]: { Async, Logger as logger }](
       req: Request[F],
