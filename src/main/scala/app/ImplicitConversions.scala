@@ -20,3 +20,5 @@ object ImplicitConversions:
     inline def whenA(fa: F[A]): F[Unit] =
       import cats.syntax.all.*
       fa.whenA(b)(using app)
+
+  extension (obj: Any) inline def as[T]: T = obj.asInstanceOf[T]

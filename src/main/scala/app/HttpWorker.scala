@@ -124,26 +124,26 @@ object HttpWorker:
     def executeJob(job: JobKind): F[JobResult] =
       (job.tag: @switch) match
         case JobKind.GetDirectorsDetailsByNameTag =>
-          getDirectorsDetailsByName(U.castTo[JobKind.GetDirectorsDetailsByName](job))
+          getDirectorsDetailsByName(job.as[JobKind.GetDirectorsDetailsByName])
         case JobKind.GetDirectorDetailsTag =>
-          getDirectorDetails(U.castTo[JobKind.GetDirectorDetails](job))
-        case JobKind.GetActorDetailsTag => getActorDetails(U.castTo[JobKind.GetActorDetails](job))
+          getDirectorDetails(job.as[JobKind.GetDirectorDetails])
+        case JobKind.GetActorDetailsTag => getActorDetails(job.as[JobKind.GetActorDetails])
         case JobKind.GetMoviesByDirectorIdTag =>
-          getMoviesByDirectorId(U.castTo[JobKind.GetMoviesByDirectorId](job))
+          getMoviesByDirectorId(job.as[JobKind.GetMoviesByDirectorId])
         case JobKind.GetMovieByIdTag =>
-          getMovieById(U.castTo[JobKind.GetMovieById](job))
+          getMovieById(job.as[JobKind.GetMovieById])
         case JobKind.GetMovieByIdWithCountingTag =>
-          getMovieByIdWithCounting(U.castTo[JobKind.GetMovieByIdWithCounting](job))
+          getMovieByIdWithCounting(job.as[JobKind.GetMovieByIdWithCounting])
         case JobKind.CreateMovieTag =>
-          createMovie(U.castTo[JobKind.CreateMovie](job))
+          createMovie(job.as[JobKind.CreateMovie])
         case JobKind.GetFileContentTag =>
-          getFileContent(U.castTo[JobKind.GetFileContent](job))
+          getFileContent(job.as[JobKind.GetFileContent])
         case JobKind.ReadTwoFilesInParallelTag =>
-          readTwoFilesInParallel(U.castTo[JobKind.ReadTwoFilesInParallel](job))
+          readTwoFilesInParallel(job.as[JobKind.ReadTwoFilesInParallel])
         case JobKind.FetchCompanyDataTag =>
-          fetchCompanyData(U.castTo[JobKind.FetchCompanyData](job))
+          fetchCompanyData(job.as[JobKind.FetchCompanyData])
         case JobKind.FetchJsonObjectTag =>
-          fetchJsonObject(U.castTo[JobKind.FetchJsonObject](job))
+          fetchJsonObject(job.as[JobKind.FetchJsonObject])
 
   private def worker[F[_]: { Async as async, Logger as logger }](
       workerId: Int,
