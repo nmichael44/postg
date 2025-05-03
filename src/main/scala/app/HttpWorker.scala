@@ -81,6 +81,13 @@ object HttpWorker:
         )
       } yield JobResult.MovieByIdWithCountingResult(movieDetailsMap.get(movieId))
 
+    private def createMovie(j: JobKind.CreateMovie): F[JobResult] =
+      val (title, year) = (j.title, j.year)
+      for {
+        _ <- U.logi(s"Creating movie with title: '$title' and year: '$year'.")
+        movieId <- mr.createMovie(title, year)
+      } yield JobResult.CreateMovieResult(movieId)
+
     private def getFileContent(j: JobKind.GetFileContent): F[JobResult] =
       val fileName = j.fileName
       for {
@@ -127,6 +134,8 @@ object HttpWorker:
           getMovieById(U.castTo[JobKind.GetMovieById](job))
         case JobKind.GetMovieByIdWithCountingTag =>
           getMovieByIdWithCounting(U.castTo[JobKind.GetMovieByIdWithCounting](job))
+        case JobKind.CreateMovieTag =>
+          createMovie(U.castTo[JobKind.CreateMovie](job))
         case JobKind.GetFileContentTag =>
           getFileContent(U.castTo[JobKind.GetFileContent](job))
         case JobKind.ReadTwoFilesInParallelTag =>

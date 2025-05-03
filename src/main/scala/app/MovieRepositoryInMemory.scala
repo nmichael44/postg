@@ -65,3 +65,6 @@ final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepositoryService[
       movieIds.toVector.foldLeft(e) { (m, movieId) =>
         Movies.get(movieId).fold(m)(m.updated(movieId, _))
       }
+
+  override def createMovie(title: String, year: Int): F[Long] =
+    ??? // For now

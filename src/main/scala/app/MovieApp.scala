@@ -10,8 +10,8 @@ import scala.concurrent.duration.*
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.AppConfig
 import app.JobSpecs.{JobKind, JobResult}
-import app.JobSpecs.JobKind.{FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovieById, GetMovieByIdWithCounting, GetMoviesByDirectorId, ReadTwoFilesInParallel}
-import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieByIdResult, MovieByIdWithCountingResult, MoviesByDirectorIdResult, TwoFilesInParallelResult}
+import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovieById, GetMovieByIdWithCounting, GetMoviesByDirectorId, ReadTwoFilesInParallel}
+import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieByIdResult, MovieByIdWithCountingResult, MoviesByDirectorIdResult, TwoFilesInParallelResult}
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
@@ -51,12 +51,16 @@ object MovieApp:
         jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](BoundedQueueCapacity)
       } yield LiveServerState[F](movieReqCounts, jobQueue)
 
-  private def enqueueJobAndWaitForResult[F[_]: { Async as async, Logger as logger }](
+  private def routeHandler[F[_]: { Async as async, Logger as logger }, T <: JobResult](
+      msg: String,
       serverState: ServerState[F],
       job: JobKind,
-  ): F[Either[Throwable, JobResult]] = {
+      f: T => F[Response[F]],
+      dsl: Http4sDsl[F],
+  ): F[Response[F]] = {
     val jobName = job.shortName
-    for {
+    val res: F[Either[Throwable, JobResult]] = for {
+      _ <- U.logi(msg)
       deferred <- Deferred[F, Either[Throwable, JobResult]]
       _ <- U.logi(s"Queueing job '$jobName'.")
       _ <- serverState.jobQueue.offer(HttpWorker.Job(job, deferred))
@@ -68,6 +72,8 @@ object MovieApp:
         case Left(e) => U.loge(e, s"Job '$jobName' failed. Returning internal server error.")
       }
     } yield outcome
+
+    res.flatMap(r => mkResponse[F, T](dsl, r, f))
   }
 
   private def mkResponse[F[_]: Async, T](
@@ -88,17 +94,13 @@ object MovieApp:
 
     ensureOnlyAllowedParams(allowedParamsForGetDirectors, req, dsl)
       .getOrElse {
-        U.logi("Fetching directors details by name.") *>
-          enqueueJobAndWaitForResult(
-            serverState,
-            GetDirectorsDetailsByName(directorPath.firstName, directorPath.lastName),
-          ) >>= { resEither =>
-          mkResponse[F, DirectorsDetailsByNameResult](
-            dsl,
-            resEither,
-            dirs => Ok(dirs.directors.asJson),
-          )
-        }
+        routeHandler[F, DirectorsDetailsByNameResult](
+          "Fetching directors details by name.",
+          serverState,
+          GetDirectorsDetailsByName(directorPath.firstName, directorPath.lastName),
+          dirs => Ok(dirs.directors.asJson),
+          dsl,
+        )
       }
 
   private def getDirectorDetails[F[_]: { Async, Logger as logger }](
@@ -108,17 +110,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Fetching directors details.") *>
-      enqueueJobAndWaitForResult(
-        serverState,
-        GetDirectorDetails(directorId),
-      ) >>= { resEither =>
-      mkResponse[F, DirectorDetailsResult](
-        dsl,
-        resEither,
-        _.director.fold(BadRequest(s"Director id: '$directorId' not found!"))(dir => Ok(dir.asJson)),
-      )
-    }
+    routeHandler[F, DirectorDetailsResult](
+      "Fetching directors details.",
+      serverState,
+      GetDirectorDetails(directorId),
+      _.director.fold(BadRequest(s"Director id: '$directorId' not found!"))(dir => Ok(dir.asJson)),
+      dsl,
+    )
 
   private def getActorDetails[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
@@ -127,14 +125,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Fetching actor details.") *>
-      enqueueJobAndWaitForResult(serverState, GetActorDetails(actorId)) >>= { resEither =>
-      mkResponse[F, ActorDetailsResult](
-        dsl,
-        resEither,
-        _.actor.fold(BadRequest(s"Actor id: '$actorId' not found!"))(act => Ok(act.asJson)),
-      )
-    }
+    routeHandler[F, ActorDetailsResult](
+      "Fetching actor details.",
+      serverState,
+      GetActorDetails(actorId),
+      _.actor.fold(BadRequest(s"Actor id: '$actorId' not found!"))(act => Ok(act.asJson)),
+      dsl,
+    )
 
   private val firstNameParam: String = "firstName"
 
@@ -157,6 +154,10 @@ object MovieApp:
   private object fileName2QueryParamDecoderMatcher
       extends QueryParamDecoderMatcher[String]("fileName2")
 
+  private object titleQueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("title")
+
+  private object yearQueryParamDecoderMatcher extends QueryParamDecoderMatcher[Int]("year")
+
   private def getMoviesByDirectorId[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
       directorId: Long,
@@ -164,14 +165,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Fetching movies by director Id.") *>
-      enqueueJobAndWaitForResult(serverState, GetMoviesByDirectorId(directorId)) >>= { resEither =>
-      mkResponse[F, MoviesByDirectorIdResult](
-        dsl,
-        resEither,
-        mvs => Ok(mvs.movies.asJson),
-      )
-    }
+    routeHandler[F, MoviesByDirectorIdResult](
+      "Fetching movies by director Id.",
+      serverState,
+      GetMoviesByDirectorId(directorId),
+      mvs => Ok(mvs.movies.asJson),
+      dsl,
+    )
 
   private def getMovieById[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
@@ -180,14 +180,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Fetching movie by Id.") *>
-      enqueueJobAndWaitForResult(serverState, GetMovieById(movieId)) >>= { resEither =>
-      mkResponse[F, MovieByIdResult](
-        dsl,
-        resEither,
-        _.movie.fold(BadRequest(s"Movie id: '$movieId' not found!"))(mv => Ok(mv.asJson)),
-      )
-    }
+    routeHandler[F, MovieByIdResult](
+      "Fetching movie by Id.",
+      serverState,
+      GetMovieById(movieId),
+      _.movie.fold(BadRequest(s"Movie id: '$movieId' not found!"))(mv => Ok(mv.asJson)),
+      dsl,
+    )
 
   private def getMovieByIdWithCounting[F[_]: { Async, Logger as logger }](
       movieId: Long,
@@ -196,14 +195,29 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Fetching movie by Id with counting.") *>
-      enqueueJobAndWaitForResult(serverState, GetMovieByIdWithCounting(movieId)) >>= { resEither =>
-      mkResponse[F, MovieByIdWithCountingResult](
-        dsl,
-        resEither,
-        _.movie.fold(BadRequest(s"Movie id: '$movieId' not found!"))(mv => Ok(mv.asJson)),
-      )
-    }
+    routeHandler[F, MovieByIdWithCountingResult](
+      "Fetching movie by Id with counting.",
+      serverState,
+      GetMovieByIdWithCounting(movieId),
+      _.movie.fold(BadRequest(s"Movie id: '$movieId' not found!"))(mv => Ok(mv.asJson)),
+      dsl,
+    )
+
+  private def createMovie[F[_]: { Async, Logger as logger }](
+      title: String,
+      year: Int,
+      serverState: ServerState[F],
+      dsl: Http4sDsl[F],
+  ): F[Response[F]] =
+    import dsl.*
+
+    routeHandler[F, CreateMovieResult](
+      "Creating new movie.",
+      serverState,
+      CreateMovie(title, year),
+      cmr => Ok(cmr.movieId.toString),
+      dsl,
+    )
 
   private def getFileContent[F[_]: { Async, Logger as logger }](
       fileName: String,
@@ -212,10 +226,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Getting file content.") *>
-      enqueueJobAndWaitForResult(serverState, GetFileContent(fileName)) >>= { resEither =>
-      mkResponse[F, FileContentResult](dsl, resEither, fc => Ok(fc.content))
-    }
+    routeHandler[F, FileContentResult](
+      "Getting file content.",
+      serverState,
+      GetFileContent(fileName),
+      fc => Ok(fc.content),
+      dsl,
+    )
 
   private def readTwoFilesInParallel[F[_]: { Async, Logger as logger }](
       fileName1: String,
@@ -225,11 +242,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Reading two files in parallel.") *>
-      enqueueJobAndWaitForResult(serverState, ReadTwoFilesInParallel(fileName1, fileName2)) >>= {
-      resEither =>
-        mkResponse[F, TwoFilesInParallelResult](dsl, resEither, tfp => Ok(tfp.content))
-    }
+    routeHandler[F, TwoFilesInParallelResult](
+      "Reading two files in parallel.",
+      serverState,
+      ReadTwoFilesInParallel(fileName1, fileName2),
+      tfp => Ok(tfp.content),
+      dsl,
+    )
 
   private def fetchCompanyData[F[_]: { Async, Logger }](
       companyName: String,
@@ -238,10 +257,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Fetching company data.") *>
-      enqueueJobAndWaitForResult(serverState, FetchCompanyData(companyName)) >>= { resEither =>
-      mkResponse[F, CompanyDataResult](dsl, resEither, cd => Ok(cd.companyData))
-    }
+    routeHandler[F, CompanyDataResult](
+      "Fetching company data.",
+      serverState,
+      FetchCompanyData(companyName),
+      cd => Ok(cd.companyData),
+      dsl,
+    )
 
   private def fetchJasonObject[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
@@ -249,10 +271,13 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    U.logi("Fetching json object.") *>
-      enqueueJobAndWaitForResult(serverState, FetchJsonObject()) >>= { resEither =>
-      mkResponse[F, JsonObjectResult](dsl, resEither, jor => Ok(jor.json))
-    }
+    routeHandler[F, JsonObjectResult](
+      "Fetching json object.",
+      serverState,
+      FetchJsonObject(),
+      jor => Ok(jor.json),
+      dsl,
+    )
 
   private def routes[F[_]: { Async, Logger }](
       serverState: ServerState[F],
@@ -272,6 +297,10 @@ object MovieApp:
       getMovieById(serverState, movieId, dsl)
     case GET -> Root / "getMovieByIdWithCounting" / LongVar(movieId) =>
       getMovieByIdWithCounting(movieId, serverState, dsl)
+    case POST -> Root / "createMovie" :? titleQueryParamDecoderMatcher(
+          title,
+        ) +& yearQueryParamDecoderMatcher(year) =>
+      createMovie(title, year, serverState, dsl)
     case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
       getFileContent(fileName, serverState, dsl)
     case GET -> Root / "readTwoFilesInParallel" :? fileName1QueryParamDecoderMatcher(

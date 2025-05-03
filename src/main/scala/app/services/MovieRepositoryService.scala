@@ -20,3 +20,5 @@ trait MovieRepositoryService[F[_]]:
   ): F[Map[Long, Seq[MovieDbModel.Movie]]]
 
   def getMoviesByIds(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]]
+
+  def createMovie(title: String, year: Int): F[Long]

@@ -5,23 +5,23 @@ drop table if exists directors;
 drop table if exists actors;
 
 create table actors(
-  actorId bigint primary key,
+  actorId bigserial primary key,
   firstName text not null,
   lastName text not null,
   dob date not null
 );
 
 create table directors(
-  directorId bigint primary key,
+  directorId bigserial primary key,
   firstName text not null,
   lastName text not null,
   dob date not null
 );
 
-create table movies(
-  movieId bigint primary key,
-  title text not null,
-  year Integer not null
+create table movies (
+    movieId bigserial primary key,
+    title text not null,
+    year integer not null
 );
 
 create table movieDirector (
@@ -31,7 +31,18 @@ create table movieDirector (
 );
 
 create table movieActor (
-  movieId BIGINT REFERENCES movies(movieId),
-  actorId BIGINT REFERENCES actors(actorId),
-  PRIMARY KEY (movieId, actorId)
+  movieId bigint references movies(movieId),
+  actorId bigint references actors(actorId),
+  primary key (movieId, actorId)
 );
+
+insert into actors (firstname, lastname, dob) values('Neo', 'Michael', '1970-04-19');
+
+insert into directors (firstname, lastname, dob) values
+('Steven', 'Spielberg', '1965-05-01'),
+('Neo', 'Michael', '1970-04-19'),
+('Neo', 'Momonedes', '2014-01-19');
+
+insert into movies (title, year) values('Xorkatikes malakies', 1980), ('Tsioftes', 2010);
+
+insert into movieDirector values(1, 2),(2, 2);

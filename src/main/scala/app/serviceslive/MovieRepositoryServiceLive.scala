@@ -88,6 +88,11 @@ private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transac
       .lastOrError
       .transact(xa)
 
+  override def createMovie(title: String, year: Int): F[Long] =
+    sql"""insert into movies (title, year) values($title, $year)""".update
+      .withUniqueGeneratedKeys[Long]("movieid")
+      .transact(xa)
+
 object MovieRepositoryServiceLive:
   def create[F[_]: Async](xa: Transactor[F]): MovieRepositoryService[F] =
     MovieRepositoryServiceLive[F](xa)
