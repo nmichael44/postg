@@ -52,13 +52,13 @@ object MovieApp:
         jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](BoundedQueueCapacity)
       } yield LiveServerState[F](movieReqCounts, jobQueue)
 
-  private def routeHandler[F[_]: { Async as async, Logger as logger }, T <: JobResult](
+  private def jobHandler[F[_]: { Async as async, Logger as logger }, T <: JobResult](
       msg: String,
       serverState: ServerState[F],
       job: JobKind,
       f: T => F[Response[F]],
       dsl: Http4sDsl[F],
-  ): F[Response[F]] = {
+  ): F[Response[F]] =
     val jobName = job.shortName
     val res: F[Either[Throwable, JobResult]] = for {
       _ <- U.logi(msg)
@@ -75,7 +75,6 @@ object MovieApp:
     } yield outcome
 
     res.flatMap(r => mkResponse[F, T](dsl, r, f))
-  }
 
   private def mkResponse[F[_]: Async, T](
       dsl: Http4sDsl[F],
@@ -83,6 +82,7 @@ object MovieApp:
       f: T => F[Response[F]],
   ): F[Response[F]] =
     import dsl.*
+
     resEither.fold(_ => InternalServerError(), x => f(x.as[T]))
 
   private def getDirectorsDetailsByName[F[_]: { Async, Logger as logger }](
@@ -95,7 +95,7 @@ object MovieApp:
 
     ensureOnlyAllowedParams(allowedParamsForGetDirectors, req, dsl)
       .getOrElse {
-        routeHandler[F, DirectorsDetailsByNameResult](
+        jobHandler[F, DirectorsDetailsByNameResult](
           "Fetching directors details by name.",
           serverState,
           GetDirectorsDetailsByName(directorPath.firstName, directorPath.lastName),
@@ -111,7 +111,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, DirectorDetailsResult](
+    jobHandler[F, DirectorDetailsResult](
       "Fetching directors details.",
       serverState,
       GetDirectorDetails(directorId),
@@ -126,7 +126,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, ActorDetailsResult](
+    jobHandler[F, ActorDetailsResult](
       "Fetching actor details.",
       serverState,
       GetActorDetails(actorId),
@@ -166,7 +166,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, MoviesByDirectorIdResult](
+    jobHandler[F, MoviesByDirectorIdResult](
       "Fetching movies by director Id.",
       serverState,
       GetMoviesByDirectorId(directorId),
@@ -181,7 +181,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, MovieByIdResult](
+    jobHandler[F, MovieByIdResult](
       "Fetching movie by Id.",
       serverState,
       GetMovieById(movieId),
@@ -196,7 +196,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, MovieByIdWithCountingResult](
+    jobHandler[F, MovieByIdWithCountingResult](
       "Fetching movie by Id with counting.",
       serverState,
       GetMovieByIdWithCounting(movieId),
@@ -212,7 +212,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, CreateMovieResult](
+    jobHandler[F, CreateMovieResult](
       "Creating new movie.",
       serverState,
       CreateMovie(title, year),
@@ -227,7 +227,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, FileContentResult](
+    jobHandler[F, FileContentResult](
       "Getting file content.",
       serverState,
       GetFileContent(fileName),
@@ -243,7 +243,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, TwoFilesInParallelResult](
+    jobHandler[F, TwoFilesInParallelResult](
       "Reading two files in parallel.",
       serverState,
       ReadTwoFilesInParallel(fileName1, fileName2),
@@ -258,7 +258,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, CompanyDataResult](
+    jobHandler[F, CompanyDataResult](
       "Fetching company data.",
       serverState,
       FetchCompanyData(companyName),
@@ -272,7 +272,7 @@ object MovieApp:
   ): F[Response[F]] =
     import dsl.*
 
-    routeHandler[F, JsonObjectResult](
+    jobHandler[F, JsonObjectResult](
       "Fetching json object.",
       serverState,
       FetchJsonObject(),
