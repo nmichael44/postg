@@ -4,12 +4,13 @@ import cats.effect.*
 import cats.effect.kernel.Async
 import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
+import cats.Applicative
 
+import scala.annotation.switch
 import scala.concurrent.duration.*
 
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.AppConfig
-import app.ImplicitConversions.*
 import app.JobSpecs.{JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovieById, GetMovieByIdWithCounting, GetMoviesByDirectorId, ReadTwoFilesInParallel}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieByIdResult, MovieByIdWithCountingResult, MoviesByDirectorIdResult, TwoFilesInParallelResult}
@@ -33,7 +34,6 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits.*
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
-import pureconfig.error.ConfigReaderException
 import pureconfig.ConfigSource
 import services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
 
@@ -52,13 +52,36 @@ object MovieApp:
         jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](BoundedQueueCapacity)
       } yield LiveServerState[F](movieReqCounts, jobQueue)
 
+  private enum WebServiceResult(val tag: Int):
+    case OkStringRes(s: String) extends WebServiceResult(WebServiceResult.OkStringResTag)
+    case OkJsonRes(json: Json) extends WebServiceResult(WebServiceResult.OkJsonResTag)
+    case BadRequestRes(e: String) extends WebServiceResult(WebServiceResult.BadRequestResTag)
+    case InternalServerErrorRes extends WebServiceResult(WebServiceResult.InternalServerErrorResTag)
+
+  private object WebServiceResult:
+    inline val OkStringResTag = 0
+    inline val OkJsonResTag = 1
+    inline val BadRequestResTag = 2
+    inline val InternalServerErrorResTag = 3
+
+  private final class Render[F[_]: Applicative](dsl: Http4sDsl[F]):
+    import app.ImplicitConversions.as
+    import dsl.*
+    import WebServiceResult.*
+
+    def apply(wsr: WebServiceResult): F[Response[F]] = (wsr.tag: @switch) match {
+      case OkStringResTag => Ok(wsr.as[OkStringRes].s)
+      case OkJsonResTag => Ok(wsr.as[OkJsonRes].json)
+      case BadRequestResTag => BadRequest(wsr.as[BadRequestRes].e)
+      case InternalServerErrorResTag => InternalServerError()
+    }
+
   private def jobHandler[F[_]: { Async as async, Logger as logger }, T <: JobResult](
       msg: String,
       serverState: ServerState[F],
       job: JobKind,
-      f: T => F[Response[F]],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
+      f: T => WebServiceResult,
+  ): F[WebServiceResult] =
     val jobName = job.shortName
     val res: F[Either[Throwable, JobResult]] = for {
       _ <- U.logi(msg)
@@ -74,86 +97,70 @@ object MovieApp:
       }
     } yield outcome
 
-    res.flatMap(r => mkResponse[F, T](dsl, r, f))
+    res.map(mkResponse[F, T](_, f))
 
   private def mkResponse[F[_]: Async, T](
-      dsl: Http4sDsl[F],
       resEither: Either[Throwable, JobResult],
-      f: T => F[Response[F]],
-  ): F[Response[F]] =
-    import dsl.*
-
-    resEither.fold(_ => InternalServerError(), x => f(x.as[T]))
+      f: T => WebServiceResult,
+  ): WebServiceResult =
+    resEither.fold(_ => WebServiceResult.InternalServerErrorRes, jr => f(jr.asInstanceOf[T]))
 
   private def getDirectorsDetailsByName[F[_]: { Async, Logger as logger }](
       req: Request[F],
       serverState: ServerState[F],
       directorPath: DirectorPath,
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
-    ensureOnlyAllowedParams(allowedParamsForGetDirectors, req, dsl)
+  ): F[WebServiceResult] =
+    ensureOnlyAllowedParams(allowedParamsForGetDirectors, req)
       .getOrElse {
         jobHandler[F, DirectorsDetailsByNameResult](
           "Fetching directors details by name.",
           serverState,
           GetDirectorsDetailsByName(directorPath.firstName, directorPath.lastName),
-          dirs => Ok(dirs.directors.asJson),
-          dsl,
+          dirs => WebServiceResult.OkJsonRes(dirs.directors.asJson),
         )
       }
 
   private def getDirectorDetails[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
       directorId: Long,
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  ): F[WebServiceResult] =
     jobHandler[F, DirectorDetailsResult](
       "Fetching directors details.",
       serverState,
       GetDirectorDetails(directorId),
-      _.director.fold(BadRequest(s"Director id: '$directorId' not found!"))(dir => Ok(dir.asJson)),
-      dsl,
+      _.director.fold(WebServiceResult.BadRequestRes(s"Director id: '$directorId' not found!"))(dir =>
+        WebServiceResult.OkJsonRes(dir.asJson),
+      ),
     )
 
   private def getActorDetails[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
       actorId: Long,
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  ): F[WebServiceResult] =
     jobHandler[F, ActorDetailsResult](
       "Fetching actor details.",
       serverState,
       GetActorDetails(actorId),
-      _.actor.fold(BadRequest(s"Actor id: '$actorId' not found!"))(act => Ok(act.asJson)),
-      dsl,
+      _.actor.fold(WebServiceResult.BadRequestRes(s"Actor id: '$actorId' not found!"))(act =>
+        WebServiceResult.OkJsonRes(act.asJson),
+      ),
     )
 
   private val firstNameParam: String = "firstName"
 
-  private object firstNameOptionalQueryParamDecoderMatcher
-      extends OptionalQueryParamDecoderMatcher[String](firstNameParam)
+  private object firstNameOptionalQueryParamDecoderMatcher extends OptionalQueryParamDecoderMatcher[String](firstNameParam)
 
   private val lastNameParam: String = "lastName"
 
-  private object lastNameOptionalQueryParamDecoderMatcher
-      extends OptionalQueryParamDecoderMatcher[String](lastNameParam)
+  private object lastNameOptionalQueryParamDecoderMatcher extends OptionalQueryParamDecoderMatcher[String](lastNameParam)
 
   private val allowedParamsForGetDirectors: Set[String] = Set(firstNameParam, lastNameParam)
 
-  private object fileNameQueryParamDecoderMatcher
-      extends QueryParamDecoderMatcher[String]("fileName")
+  private object fileNameQueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("fileName")
 
-  private object fileName1QueryParamDecoderMatcher
-      extends QueryParamDecoderMatcher[String]("fileName1")
+  private object fileName1QueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("fileName1")
 
-  private object fileName2QueryParamDecoderMatcher
-      extends QueryParamDecoderMatcher[String]("fileName2")
+  private object fileName2QueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("fileName2")
 
   private object titleQueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("title")
 
@@ -162,176 +169,151 @@ object MovieApp:
   private def getMoviesByDirectorId[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
       directorId: Long,
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  ): F[WebServiceResult] =
     jobHandler[F, MoviesByDirectorIdResult](
       "Fetching movies by director Id.",
       serverState,
       GetMoviesByDirectorId(directorId),
-      mvs => Ok(mvs.movies.asJson),
-      dsl,
+      mvs => WebServiceResult.OkJsonRes(mvs.movies.asJson),
     )
 
   private def getMovieById[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
       movieId: Long,
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
+  ): F[WebServiceResult] =
 
     jobHandler[F, MovieByIdResult](
       "Fetching movie by Id.",
       serverState,
       GetMovieById(movieId),
-      _.movie.fold(BadRequest(s"Movie id: '$movieId' not found!"))(mv => Ok(mv.asJson)),
-      dsl,
+      _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!"))(mv =>
+        WebServiceResult.OkJsonRes(mv.asJson),
+      ),
     )
 
   private def getMovieByIdWithCounting[F[_]: { Async, Logger as logger }](
       movieId: Long,
       serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  ): F[WebServiceResult] =
     jobHandler[F, MovieByIdWithCountingResult](
       "Fetching movie by Id with counting.",
       serverState,
       GetMovieByIdWithCounting(movieId),
-      _.movie.fold(BadRequest(s"Movie id: '$movieId' not found!"))(mv => Ok(mv.asJson)),
-      dsl,
+      _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!"))(mv =>
+        WebServiceResult.OkJsonRes(mv.asJson),
+      ),
     )
 
   private def createMovie[F[_]: { Async, Logger as logger }](
       title: String,
       year: Int,
       serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  ): F[WebServiceResult] =
     jobHandler[F, CreateMovieResult](
       "Creating new movie.",
       serverState,
       CreateMovie(title, year),
-      cmr => Ok(cmr.movieId.toString),
-      dsl,
+      cmr => WebServiceResult.OkStringRes(cmr.movieId.toString),
     )
 
   private def getFileContent[F[_]: { Async, Logger as logger }](
       fileName: String,
       serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  ): F[WebServiceResult] =
     jobHandler[F, FileContentResult](
       "Getting file content.",
       serverState,
       GetFileContent(fileName),
-      fc => Ok(fc.content),
-      dsl,
+      fc => WebServiceResult.OkStringRes(fc.content),
     )
 
   private def readTwoFilesInParallel[F[_]: { Async, Logger as logger }](
       fileName1: String,
       fileName2: String,
       serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  ): F[WebServiceResult] =
     jobHandler[F, TwoFilesInParallelResult](
       "Reading two files in parallel.",
       serverState,
       ReadTwoFilesInParallel(fileName1, fileName2),
-      tfp => Ok(tfp.content),
-      dsl,
+      tfp => WebServiceResult.OkStringRes(tfp.content),
     )
 
-  private def fetchCompanyData[F[_]: { Async, Logger }](
-      companyName: String,
-      serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  private def fetchCompanyData[F[_]: { Async, Logger }](companyName: String, serverState: ServerState[F]): F[WebServiceResult] =
     jobHandler[F, CompanyDataResult](
       "Fetching company data.",
       serverState,
       FetchCompanyData(companyName),
-      cd => Ok(cd.companyData),
-      dsl,
+      cd => WebServiceResult.OkStringRes(cd.companyData),
     )
 
-  private def fetchJasonObject[F[_]: { Async, Logger as logger }](
-      serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): F[Response[F]] =
-    import dsl.*
-
+  private def fetchJasonObject[F[_]: { Async, Logger as logger }](serverState: ServerState[F]): F[WebServiceResult] =
     jobHandler[F, JsonObjectResult](
       "Fetching json object.",
       serverState,
       FetchJsonObject(),
-      jor => Ok(jor.json),
-      dsl,
+      jor => WebServiceResult.OkJsonRes(jor.json),
     )
 
-  private def routes[F[_]: { Async, Logger }](
+  private def routesDefinition[F[_]: { Async, Logger }](
       serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): PartialFunction[Request[F], F[Response[F]]] =
+  ): PartialFunction[Request[F], F[WebServiceResult]] =
     case req @ GET -> Root / "getDirectorsByName" :? firstNameOptionalQueryParamDecoderMatcher(
           firstName,
         ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>
-      getDirectorsDetailsByName(req, serverState, DirectorPath(firstName, lastName), dsl)
+      getDirectorsDetailsByName(
+        req,
+        serverState,
+        DirectorPath(firstName, lastName),
+      )
     case GET -> Root / "getDirector" / LongVar(directorId) =>
-      getDirectorDetails(serverState, directorId, dsl)
+      getDirectorDetails(serverState, directorId)
     case GET -> Root / "getActor" / LongVar(actorId) =>
-      getActorDetails(serverState, actorId, dsl)
+      getActorDetails(serverState, actorId)
     case GET -> Root / "getMoviesByDirector" / LongVar(directorId) =>
-      getMoviesByDirectorId(serverState, directorId, dsl)
+      getMoviesByDirectorId(serverState, directorId)
     case GET -> Root / "getMovieById" / LongVar(movieId) =>
-      getMovieById(serverState, movieId, dsl)
+      getMovieById(serverState, movieId)
     case GET -> Root / "getMovieByIdWithCounting" / LongVar(movieId) =>
-      getMovieByIdWithCounting(movieId, serverState, dsl)
+      getMovieByIdWithCounting(movieId, serverState)
     case POST -> Root / "createMovie" :? titleQueryParamDecoderMatcher(
           title,
         ) +& yearQueryParamDecoderMatcher(year) =>
-      createMovie(title, year, serverState, dsl)
+      createMovie(title, year, serverState)
     case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
-      getFileContent(fileName, serverState, dsl)
+      getFileContent(fileName, serverState)
     case GET -> Root / "readTwoFilesInParallel" :? fileName1QueryParamDecoderMatcher(
           fileName1,
         ) +& fileName2QueryParamDecoderMatcher(fileName2) =>
-      readTwoFilesInParallel(fileName1, fileName2, serverState, dsl)
+      readTwoFilesInParallel(fileName1, fileName2, serverState)
     case GET -> Root / "fetchCompanyData" / companyName =>
-      fetchCompanyData(companyName, serverState, dsl)
+      fetchCompanyData(companyName, serverState)
     case GET -> Root / "getJsonObject" =>
-      fetchJasonObject(serverState, dsl)
+      fetchJasonObject(serverState)
 
-  private def allRoutesComplete[F[_]: { Async, Logger }](
+  private def routes[F[_]: { Async, Logger }](
       serverState: ServerState[F],
-      dsl: Http4sDsl[F],
-  ): HttpApp[F] =
+      render: Render[F],
+  ): PartialFunction[Request[F], F[Response[F]]] =
+    routesDefinition(serverState).andThen(_ >>= render.apply)
+
+  private def allRoutesComplete[F[_]: { Async, Logger }](serverState: ServerState[F], render: Render[F]): HttpApp[F] =
     HttpRoutes
-      .of[F](routes[F](serverState, dsl))
+      .of[F](routes[F](serverState, render))
       .orNotFound
 
-  private def ensureOnlyAllowedParams[F[_]: MonadCancelThrow](
+  private def ensureOnlyAllowedParams[F[_]: Applicative as app](
       allowedParams: Set[String],
       req: Request[F],
-      dsl: Http4sDsl[F],
-  ): Option[F[Response[F]]] =
-    import dsl.*
-
+  ): Option[F[WebServiceResult]] =
     val providedParams = req.multiParams.keySet
     val extraParams = providedParams -- allowedParams
     Option.when(extraParams.nonEmpty)(
-      BadRequest(s"Extra params found in quest: ${extraParams.mkString(", ")}."),
+      app.pure(
+        WebServiceResult.BadRequestRes(
+          s"Extra params found in quest: ${extraParams.mkString(", ")}.",
+        ),
+      ),
     )
 
   private def getServerHostIPPort(appConfig: AppConfig): (Ipv4Address, Port) =
@@ -361,56 +343,68 @@ object MovieApp:
       .withHttpApp(httpApp)
       .build
 
+  private type CoreResources[F[_]] =
+    Resource[
+      F,
+      (AppConfig, ServerState[F], http4s.client.Client[F], Supervisor[F], Transactor[F]),
+    ]
+
   def run: IO[ExitCode] =
     type F = IO
 
     Slf4jLogger.create[F].flatMap { implicit logger =>
-      ConfigSource.default.at("app-config").load[AppConfig] match {
-        case Left(failures) => IO.raiseError(ConfigReaderException[AppConfig](failures))
-        case Right(appConfig) =>
-          val coreResources: Resource[F, (http4s.client.Client[F], Supervisor[F], Transactor[F])] =
-            for {
-              httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
-              supervisor <- Supervisor[F]
-              xa <- DoobieObj.xaResource(appConfig)
-            } yield (httpClient, supervisor, xa)
+      val configResource: Resource[F, AppConfig] =
+        Resource.eval(
+          IO.fromEither(
+            ConfigSource.default
+              .at("app-config")
+              .load[AppConfig]
+              .left
+              .map(pureconfig.error.ConfigReaderException[AppConfig]),
+          ),
+        )
+      val coreResources: CoreResources[F] = for {
+        appConfig <- configResource
+        serverState <- Resource.eval(LiveServerState.create[F])
+        httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
+        supervisor <- Supervisor[F]
+        xa <- DoobieObj.xaResource(appConfig)
+      } yield (appConfig, serverState, httpClient, supervisor, xa)
 
-          coreResources.use { (httpClient, supervisor, xa) =>
-            val externalApiClientService: ExternalApiClientService[F] =
-              ExternalApiClientServiceLive.create[F](httpClient)
-            val movieRepositoryService: MovieRepositoryService[F] =
-              MovieRepositoryServiceLive.create(xa)
-            val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create
+      coreResources.use { (appConfig, serverState, httpClient, supervisor, xa) =>
+        val externalApiClientService: ExternalApiClientService[F] =
+          ExternalApiClientServiceLive.create[F](httpClient)
+        val movieRepositoryService: MovieRepositoryService[F] =
+          MovieRepositoryServiceLive.create(xa)
+        val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create
 
-            val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
-            val dsl: Http4sDsl[F] = Http4sDsl[F]
+        val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
+        val render: Render[F] = Render(Http4sDsl[F])
 
-            for {
-              serverState <- LiveServerState.create[F]
-              _ <- {
-                val serverStateUpdateService: ServerStateUpdateService[F] =
-                  ServerStateUpdateServiceLive.create(serverState)
+        for {
+          _ <- {
+            val serverStateUpdateService: ServerStateUpdateService[F] =
+              ServerStateUpdateServiceLive.create(serverState)
 
-                HttpWorker.startWorkers(
-                  movieRepositoryService,
-                  externalApiClientService,
-                  fileSystemService,
-                  serverStateUpdateService,
-                  serverState.jobQueue,
-                  supervisor,
-                )
-              }
-              httpServer <- {
-                val httpApp: HttpApp[F] = allRoutesComplete[F](serverState, dsl)
-                createServerResource(serverHostIP, serverHostPort, httpApp)
-                  .use(server =>
-                    U.logi(
-                      s"Server started with base uri: '${server.baseUri.toString}'.",
-                    ) *> Async[F].never,
-                  )
-                  .as(ExitCode.Success)
-              }
-            } yield httpServer
+            HttpWorker.startWorkers(
+              movieRepositoryService,
+              externalApiClientService,
+              fileSystemService,
+              serverStateUpdateService,
+              serverState.jobQueue,
+              supervisor,
+            )
           }
+          exitCode <- {
+            val httpApp: HttpApp[F] = allRoutesComplete[F](serverState, render)
+            createServerResource(serverHostIP, serverHostPort, httpApp)
+              .use(server =>
+                U.logi(
+                  s"Server started with base uri: '${server.baseUri.toString}'.",
+                ) *> Async[F].never,
+              )
+              .as(ExitCode.Success)
+          }
+        } yield exitCode
       }
     }

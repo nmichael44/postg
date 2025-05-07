@@ -17,12 +17,10 @@ object PasswordValidator:
   // If the sequence is empty then the password was good.
   def isPasswordGoodEnough(password: String): Seq[String] =
     val vb = Vector.newBuilder[String]
-    if !isLongEnough(password) then
-      vb.addOne(s"Password must be at least $PasswordMinLen characters.")
+    if !isLongEnough(password) then vb.addOne(s"Password must be at least $PasswordMinLen characters.")
     if !hasUpperCase(password) then vb.addOne("Password must have uppercase characters.")
     if !hasLowerCase(password) then vb.addOne("Password must have lowercase characters.")
     if !hasDigit(password) then vb.addOne("Password must have at least one digits.")
-    if !hasSpecialChar(password) then
-      vb.addOne("Password must have at least one special character.")
+    if !hasSpecialChar(password) then vb.addOne("Password must have at least one special character.")
 
     vb.result()

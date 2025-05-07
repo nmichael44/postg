@@ -19,7 +19,6 @@ trait FileSystemService[F[_]]:
    * @param fileName2
    *   The name or path of the second file.
    * @return
-   *   An F containing the concatenated content of the two files, or an error if either file cannot
-   *   be read.
+   *   An F containing the concatenated content of the two files, or an error if either file cannot be read.
    */
   def readTwoFilesInParallel(fileName1: String, fileName2: String): F[String]

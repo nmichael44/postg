@@ -55,7 +55,7 @@ object Switches:
   // Dispatch in Scala is a disaster.
   def evalO(omega: Omega): Int =
     import scala.annotation.switch
-    (omega: @switch) match {
+    omega /*: @switch*/ match {
       case Omega.O0 => 0
       case Omega.O1 => 1
       case Omega.O2 => 2
