@@ -9,13 +9,14 @@ import scala.annotation.switch
 import scala.concurrent.duration.*
 
 import app.services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
+import app.AppConfig.BackendServerConfig
 import app.ImplicitConversions.*
 import app.JobSpecs.{JobKind, JobResult}
 import app.Utils as U
 import io.circe.*
 import io.circe.generic.auto.*
 import io.circe.syntax.*
-import org.http4s.{Response, Uri}
+import org.http4s.Uri
 import org.typelevel.log4cats.Logger
 
 object HttpWorker:
@@ -127,7 +128,8 @@ object HttpWorker:
           getDirectorsDetailsByName(job.as[JobKind.GetDirectorsDetailsByName])
         case JobKind.GetDirectorDetailsTag =>
           getDirectorDetails(job.as[JobKind.GetDirectorDetails])
-        case JobKind.GetActorDetailsTag => getActorDetails(job.as[JobKind.GetActorDetails])
+        case JobKind.GetActorDetailsTag =>
+          getActorDetails(job.as[JobKind.GetActorDetails])
         case JobKind.GetMoviesByDirectorIdTag =>
           getMoviesByDirectorId(job.as[JobKind.GetMoviesByDirectorId])
         case JobKind.GetMovieByIdTag =>
@@ -169,19 +171,18 @@ object HttpWorker:
 
     processOneJobSafely.foreverM
 
-  inline private val NumberOfWorkers = 32
-
   def startWorkers[F[_]: { Async, Logger }](
+      backendServer: BackendServerConfig,
       mr: MovieRepositoryService[F],
       apiClient: ExternalApiClientService[F],
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
       queue: Queue[F, HttpWorker.Job[F]],
       supervisor: Supervisor[F],
-  ): F[Unit] = {
+  ): F[Unit] =
     val jobExecutor: JobExecutor[F] =
       JobExecutor(mr, apiClient, fileSystemService, serverStateUpdateService)
 
-    (0 until NumberOfWorkers).toVector
+    val numberOfWorkers = backendServer.getNumberOfWorkers
+    (0 until numberOfWorkers).toVector
       .traverse_(workerId => supervisor.supervise(worker(workerId, queue, jobExecutor)))
-  }

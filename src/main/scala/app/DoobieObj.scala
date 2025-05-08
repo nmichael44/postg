@@ -12,6 +12,7 @@ import cats.implicits.*
 import scala.concurrent.ExecutionContext
 
 import app.AppConfig.AppConfig
+import com.zaxxer.hikari.HikariConfig
 import doobie.*
 import doobie.free.connection
 import doobie.hikari.HikariTransactor
@@ -21,38 +22,40 @@ import doobie.util.transactor
 object DoobieObj:
   private final val DriverName: String = "org.postgresql.Driver"
 
-  private def createTransactor(
-      appConfig: AppConfig,
-      ec: ExecutionContext,
-  ): Resource[IO, HikariTransactor[IO]] =
-    val dbConfig = appConfig.getDbConnection
+  private def createTransactorResource(appConfig: AppConfig): Resource[IO, HikariTransactor[IO]] =
+    val dbConfig = appConfig.getDbConnectionConfig
     val (host, port) = (dbConfig.getHost, dbConfig.getPort)
 
     val databaseURL = s"jdbc:postgresql://$host:$port/postgres"
     val user = dbConfig.getUser
     val password = dbConfig.getPassword
+    val maxConnections = dbConfig.getMaxConnections
+    val minIdleConnections = dbConfig.getMinIdleConnections
 
-    HikariTransactor.newHikariTransactor[IO](
-      DriverName,
-      databaseURL,
-      user,
-      password,
-      ec,
-      None,
-    )
+    val hikariConfig = new HikariConfig()
+    hikariConfig.setDriverClassName(DriverName)
+    hikariConfig.setJdbcUrl(databaseURL)
+    hikariConfig.setUsername(user)
+    hikariConfig.setPassword(password)
+
+    // Set the maximum pool size
+    hikariConfig.setMaximumPoolSize(maxConnections)
+    hikariConfig.setMinimumIdle(minIdleConnections)
+
+    HikariTransactor.fromHikariConfig[IO](hikariConfig)
+
+  def xaResource(appConfig: AppConfig): Resource[IO, HikariTransactor[IO]] =
+    createTransactorResource(appConfig)
 
   // A transactor that gets connections from java.sql.DriverManager and executes blocking operations
   // on our synchronous EC. See the chapter on connection handling for more info.
-//  private val xa: Transactor[IO] = Transactor.fromDriverManager[IO](
-//    driver = "org.postgresql.Driver", // JDBC driver classname
-//    url = "jdbc:postgresql://localhost:5432/postgres", // Connect URL
-//    user = "neom", // Database user name
-//    password = "neom11", // Database password
-//    logHandler = None // Don't set up logging for now. See Logging page for how to log events in detail
-//  )
-
-  def xaResource(appConfig: AppConfig): Resource[IO, HikariTransactor[IO]] =
-    createTransactor(appConfig, ExecutionContext.global)
+  //  private val xa: Transactor[IO] = Transactor.fromDriverManager[IO](
+  //    driver = "org.postgresql.Driver", // JDBC driver classname
+  //    url = "jdbc:postgresql://localhost:5432/postgres", // Connect URL
+  //    user = "neom", // Database user name
+  //    password = "neom11", // Database password
+  //    logHandler = None // Don't set up logging for now. See Logging page for how to log events in detail
+  //  )
 
   /*
   def f1(xa: Transactor[IO]): IO[Int] = 42.pure[ConnectionIO].transact(xa)

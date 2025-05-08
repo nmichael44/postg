@@ -10,7 +10,7 @@ import scala.annotation.switch
 import scala.concurrent.duration.*
 
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
-import app.AppConfig.AppConfig
+import app.AppConfig.{AppConfig, BackendServerConfig}
 import app.JobSpecs.{JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovieById, GetMovieByIdWithCounting, GetMoviesByDirectorId, ReadTwoFilesInParallel}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieByIdResult, MovieByIdWithCountingResult, MoviesByDirectorIdResult, TwoFilesInParallelResult}
@@ -38,19 +38,19 @@ import pureconfig.ConfigSource
 import services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
 
 object MovieApp:
-  private final val BoundedQueueCapacity: Int = 256
-
   private final case class LiveServerState[F[_]](
       movieRequestCounts: Ref[F, Map[Long, Int]],
       jobQueue: Queue[F, HttpWorker.Job[F]],
   ) extends ServerState[F]
 
   private object LiveServerState:
-    def create[F[_]: Async]: F[ServerState[F]] =
+    def create[F[_]: Async](backendServer: BackendServerConfig): F[ServerState[F]] = {
+      val boundedQueueCapacity = backendServer.getBoundedQueueCapacity
       for {
         movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
-        jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](BoundedQueueCapacity)
+        jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](boundedQueueCapacity)
       } yield LiveServerState[F](movieReqCounts, jobQueue)
+    }
 
   private enum WebServiceResult(val tag: Int):
     case OkStringRes(s: String) extends WebServiceResult(WebServiceResult.OkStringResTag)
@@ -298,9 +298,7 @@ object MovieApp:
     routesDefinition(serverState).andThen(_ >>= render.apply)
 
   private def allRoutesComplete[F[_]: { Async, Logger }](serverState: ServerState[F], render: Render[F]): HttpApp[F] =
-    HttpRoutes
-      .of[F](routes[F](serverState, render))
-      .orNotFound
+    HttpRoutes.of[F](routes[F](serverState, render)).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: Applicative as app](
       allowedParams: Set[String],
@@ -317,7 +315,7 @@ object MovieApp:
     )
 
   private def getServerHostIPPort(appConfig: AppConfig): (Ipv4Address, Port) =
-    val serverConnection = appConfig.getServerConnection
+    val serverConnection = appConfig.getServerConnectionConfig
     val (host, port) = (serverConnection.getHost, serverConnection.getPort)
 
     (Ipv4Address.fromString(host), Port.fromInt(port)) match {
@@ -365,7 +363,7 @@ object MovieApp:
         )
       val coreResources: CoreResources[F] = for {
         appConfig <- configResource
-        serverState <- Resource.eval(LiveServerState.create[F])
+        serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
         supervisor <- Supervisor[F]
         xa <- DoobieObj.xaResource(appConfig)
@@ -387,6 +385,7 @@ object MovieApp:
               ServerStateUpdateServiceLive.create(serverState)
 
             HttpWorker.startWorkers(
+              appConfig.getBackendServerConfig,
               movieRepositoryService,
               externalApiClientService,
               fileSystemService,

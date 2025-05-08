@@ -7,31 +7,42 @@ import pureconfig.error.{CannotConvert, ConfigReaderFailures, ConvertFailure}
 import pureconfig.ConvertHelpers.*
 
 object AppConfig:
-  final case class DbConnection(
+  final case class DbConnectionConfig(
       private val host: String,
       private val port: Port,
       private val user: String,
       private val password: String,
+      private val maxConnections: Int,
+      private val minIdleConnections: Int,
   ) derives ConfigReader:
     def getHost: String = host
     def getPort: Int = port.port
     def getUser: String = user
     def getPassword: String = password
+    def getMaxConnections: Int = maxConnections
+    def getMinIdleConnections: Int = minIdleConnections
 
-  final case class ServerConnection(
+  final case class ServerConnectionConfig(
       private val host: String,
       private val port: Port,
   ) derives ConfigReader:
     def getHost: String = host
     def getPort: Int = port.port
 
+  final case class BackendServerConfig(private val numberOfWorkers: Int, private val boundedQueueCapacity: Int)
+      derives ConfigReader:
+    def getNumberOfWorkers: Int = numberOfWorkers
+    def getBoundedQueueCapacity: Int = boundedQueueCapacity
+
   final case class AppConfig(
       private val name: String,
-      private val dbConnection: DbConnection,
-      private val serverConnection: ServerConnection,
+      private val dbConnectionConfig: DbConnectionConfig,
+      private val serverConnectionConfig: ServerConnectionConfig,
+      private val backendServerConfig: BackendServerConfig,
   ) derives ConfigReader:
-    def getDbConnection: DbConnection = dbConnection
-    def getServerConnection: ServerConnection = serverConnection
+    def getDbConnectionConfig: DbConnectionConfig = dbConnectionConfig
+    def getServerConnectionConfig: ServerConnectionConfig = serverConnectionConfig
+    def getBackendServerConfig: BackendServerConfig = backendServerConfig
 
   final case class Port(port: Int) extends AnyVal
 
