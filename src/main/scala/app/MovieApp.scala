@@ -1,7 +1,7 @@
 package app
 
 import cats.effect.*
-import cats.effect.kernel.Async
+import cats.effect.kernel.{Async, Resource}
 import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
 import cats.Applicative
@@ -49,6 +49,7 @@ object MovieApp:
       for {
         movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
         jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](boundedQueueCapacity)
+
       } yield LiveServerState[F](movieReqCounts, jobQueue)
     }
 
@@ -65,14 +66,14 @@ object MovieApp:
     inline val InternalServerErrorResTag = 3
 
   private final class Render[F[_]: Applicative](dsl: Http4sDsl[F]):
-    import app.ImplicitConversions.as
+    import app.ImplicitConversions.castAs
     import dsl.*
     import WebServiceResult.*
 
     def apply(wsr: WebServiceResult): F[Response[F]] = (wsr.tag: @switch) match {
-      case OkStringResTag => Ok(wsr.as[OkStringRes].s)
-      case OkJsonResTag => Ok(wsr.as[OkJsonRes].json)
-      case BadRequestResTag => BadRequest(wsr.as[BadRequestRes].e)
+      case OkStringResTag => Ok(wsr.castAs[OkStringRes].s)
+      case OkJsonResTag => Ok(wsr.castAs[OkJsonRes].json)
+      case BadRequestResTag => BadRequest(wsr.castAs[BadRequestRes].e)
       case InternalServerErrorResTag => InternalServerError()
     }
 
@@ -181,14 +182,13 @@ object MovieApp:
       serverState: ServerState[F],
       movieId: Long,
   ): F[WebServiceResult] =
-
     jobHandler[F, MovieByIdResult](
       "Fetching movie by Id.",
       serverState,
       GetMovieById(movieId),
-      _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!"))(mv =>
-        WebServiceResult.OkJsonRes(mv.asJson),
-      ),
+      _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!")) { mv =>
+        WebServiceResult.OkJsonRes(mv.asJson)
+      },
     )
 
   private def getMovieByIdWithCounting[F[_]: { Async, Logger as logger }](
@@ -341,12 +341,6 @@ object MovieApp:
       .withHttpApp(httpApp)
       .build
 
-  private type CoreResources[F[_]] =
-    Resource[
-      F,
-      (AppConfig, ServerState[F], http4s.client.Client[F], Supervisor[F], Transactor[F]),
-    ]
-
   def run: IO[ExitCode] =
     type F = IO
 
@@ -361,15 +355,31 @@ object MovieApp:
               .map(pureconfig.error.ConfigReaderException[AppConfig]),
           ),
         )
+
+      type CoreResources[F[_]] =
+        Resource[
+          F,
+          (
+              AppConfig,
+              ServerState[F],
+              http4s.client.Client[F],
+              Supervisor[F],
+              Transactor[F],
+              MemCache[F, Long, MovieDbModel.Actor],
+          ),
+        ]
+
       val coreResources: CoreResources[F] = for {
         appConfig <- configResource
-        serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
+        backendServerConfig = appConfig.getBackendServerConfig
+        actorMemCache <- MemCache.createResource[F, Long, MovieDbModel.Actor](backendServerConfig)
+        serverState <- Resource.eval(LiveServerState.create[F](backendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
         supervisor <- Supervisor[F]
         xa <- DoobieObj.xaResource(appConfig)
-      } yield (appConfig, serverState, httpClient, supervisor, xa)
+      } yield (appConfig, serverState, httpClient, supervisor, xa, actorMemCache)
 
-      coreResources.use { (appConfig, serverState, httpClient, supervisor, xa) =>
+      coreResources.use { (appConfig, serverState, httpClient, supervisor, xa, actorMemCache) =>
         val externalApiClientService: ExternalApiClientService[F] =
           ExternalApiClientServiceLive.create[F](httpClient)
         val movieRepositoryService: MovieRepositoryService[F] =
@@ -392,6 +402,7 @@ object MovieApp:
               serverStateUpdateService,
               serverState.jobQueue,
               supervisor,
+              actorMemCache,
             )
           }
           exitCode <- {

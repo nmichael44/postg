@@ -2,7 +2,7 @@ package app
 
 import cats.{FlatMap, Functor}
 import cats.effect.{ExitCode, Temporal}
-import cats.effect.kernel.{Fiber, Ref}
+import cats.effect.kernel.{Fiber, Ref, Resource}
 import cats.effect.syntax.all.*
 import cats.implicits.*
 
@@ -11,6 +11,7 @@ import scala.collection.immutable.TreeMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.DurationInt
 
+import app.AppConfig.BackendServerConfig
 import org.typelevel.log4cats.Logger
 
 final class MemCache[F[_]: { Temporal, Logger }, K: Ordering, V](
@@ -39,17 +40,24 @@ final class MemCache[F[_]: { Temporal, Logger }, K: Ordering, V](
       r.modify(m => (m.updated(k, (v, durationOpt.map(now.plus))), ()))
     }
 
-object MemCache:
-  def create[F[_]: { Temporal, Logger }, K: Ordering, V]: F[MemCache[F, K, V]] = {
-    val logger = Logger[F]
+  private def stopCleanupFiber(): F[Unit] = cleanupFiber.cancel
 
+object MemCache:
+  private def create[F[_]: { Temporal, Logger as logger }, K: Ordering, V](cleanupDuration: Duration): F[MemCache[F, K, V]] =
     for {
       r <- Ref.of(TreeMap.empty[K, (V, Option[Instant])])
-      cleanupFiber <- startWorker(r, logger)
+      cleanupFiber <- startWorker(r, cleanupDuration, logger)
     } yield MemCache(r, cleanupFiber)
-  }
 
-  private val CleanupInterval: Duration = 1.minutes
+  private def create[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
+      backendServerConfig: BackendServerConfig,
+  ): F[MemCache[F, K, V]] =
+    create(backendServerConfig.getActorMemCacheCleanupDurationInMillis.milliseconds)
+
+  def createResource[F[_]: { Temporal, Logger }, K: Ordering, V](
+      backendServerConfig: BackendServerConfig,
+  ): Resource[F, MemCache[F, K, V]] =
+    Resource.make(create(backendServerConfig))(_.stopCleanupFiber())
 
   private def getSize[F[_]: Functor, K, V](r: Ref[F, TreeMap[K, (V, Option[Instant])]]): F[Int] =
     r.get.map(_.size)
@@ -59,17 +67,16 @@ object MemCache:
       when: String,
       logger: Logger[F],
   ): F[Unit] =
-    getSize(r).>>=(siz => logger.info(s"Size of cache $when worker touched it: $siz"))
+    getSize(r) >>= (siz => logger.info(s"Size of cache $when worker touched it: $siz"))
 
-  private def worker[F[_]: Temporal, K: Ordering, V](
+  private def worker[F[_]: Temporal as temporal, K: Ordering, V](
       r: Ref[F, TreeMap[K, (V, Option[Instant])]],
+      cleanupInterval: Duration,
       logger: Logger[F],
   ): F[Nothing] =
-    val temporal = Temporal[F]
-
     (for {
       _ <- logger.info("Cleanup worker going to sleep until it's time to work...")
-      _ <- temporal.sleep(CleanupInterval)
+      _ <- temporal.sleep(cleanupInterval)
       _ <- logger.info("Cleanup worker is awake and going to work...")
       _ <- reportSize(r, "before", logger)
       now <- temporal.realTimeInstant
@@ -84,19 +91,18 @@ object MemCache:
 
   private def startWorker[F[_]: Temporal, K: Ordering, V](
       r: Ref[F, TreeMap[K, (V, Option[Instant])]],
+      cleanupInterval: Duration,
       logger: Logger[F],
   ): F[Fiber[F, Throwable, Nothing]] = for {
     _ <- logger.info("Starting mem cache worker...")
-    cleanupFiber <- worker(r, logger).start
+    cleanupFiber <- worker(r, cleanupInterval, logger).start
     _ <- logger.info("Worker is running...")
     _ <- logger.info(s"Fiber is '${cleanupFiber.toString}'.")
   } yield cleanupFiber
 
-  def run[F[_]: { Temporal, Logger }]: F[ExitCode] = {
-    val logger = Logger[F]
-    val temporal = Temporal[F]
+  def run[F[_]: { Temporal as temporal, Logger as logger }]: F[ExitCode] =
     for {
-      cache <- MemCache.create[F, String, Int]
+      cache <- MemCache.create[F, String, Int](1.minutes)
       _ <- logger.info("Putting key 'a' with no timeout.")
       _ <- cache.put("a", 1)
       _ <- logger.info("Getting key 'a' immediately.")
@@ -145,4 +151,3 @@ object MemCache:
       // background fiber is cancelled when the cache is no longer needed.
       // IOApp.Simple handles the lifecycle of fibers started within 'run' implicitly.
     } yield ExitCode.Success
-  }

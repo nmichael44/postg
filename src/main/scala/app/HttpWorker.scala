@@ -30,6 +30,7 @@ object HttpWorker:
       apiClient: ExternalApiClientService[F],
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
+      actorMemCache: MemCache[F, Long, MovieDbModel.Actor],
   ):
     private def getDirectorsDetailsByName(j: JobKind.GetDirectorsDetailsByName): F[JobResult] =
       val (firstName, lastName) = (j.firstName, j.lastName)
@@ -48,12 +49,30 @@ object HttpWorker:
         directorDetailsMap <- mr.getDirectorDetails(NonEmptyVector.one(directorId))
       } yield JobResult.DirectorDetailsResult(directorDetailsMap.get(directorId))
 
+    private val ActorCacheDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
+
     private def getActorDetails(j: JobKind.GetActorDetails): F[JobResult] =
       val actorId = j.actorId
+
       for {
         _ <- U.logi(s"Fetching actor details for ID: $actorId")
-        actorDetailsMap <- mr.getActorDetails(NonEmptyVector.one(actorId))
-      } yield JobResult.ActorDetailsResult(actorDetailsMap.get(actorId))
+        cachedActorOpt <- actorMemCache.get(actorId)
+        actorOpt <- cachedActorOpt match {
+          case Some(actor) =>
+            U.logi(s"Actor details for ID: $actorId found in cache.").as(Some(actor))
+          case None =>
+            U.logi(s"Actor details for ID: $actorId not found in cache. Fetching from DB.") *>
+              mr.getActorDetails(NonEmptyVector.one(actorId)) >>= { actorDetailsMap =>
+              actorDetailsMap.get(actorId) match {
+                case Some(actor) =>
+                  U.logi(s"Actor details for ID: $actorId found in DB. Putting in cache.") *>
+                    actorMemCache.put(actorId, actor, ActorCacheDuration).as(Some(actor))
+                case None =>
+                  U.logi(s"Actor details for ID: $actorId not found in DB.").as(None)
+              }
+            }
+        }
+      } yield JobResult.ActorDetailsResult(actorOpt)
 
     private def getMoviesByDirectorId(
         j: JobKind.GetMoviesByDirectorId,
@@ -125,27 +144,27 @@ object HttpWorker:
     def executeJob(job: JobKind): F[JobResult] =
       (job.tag: @switch) match
         case JobKind.GetDirectorsDetailsByNameTag =>
-          getDirectorsDetailsByName(job.as[JobKind.GetDirectorsDetailsByName])
+          getDirectorsDetailsByName(job.castAs[JobKind.GetDirectorsDetailsByName])
         case JobKind.GetDirectorDetailsTag =>
-          getDirectorDetails(job.as[JobKind.GetDirectorDetails])
+          getDirectorDetails(job.castAs[JobKind.GetDirectorDetails])
         case JobKind.GetActorDetailsTag =>
-          getActorDetails(job.as[JobKind.GetActorDetails])
+          getActorDetails(job.castAs[JobKind.GetActorDetails])
         case JobKind.GetMoviesByDirectorIdTag =>
-          getMoviesByDirectorId(job.as[JobKind.GetMoviesByDirectorId])
+          getMoviesByDirectorId(job.castAs[JobKind.GetMoviesByDirectorId])
         case JobKind.GetMovieByIdTag =>
-          getMovieById(job.as[JobKind.GetMovieById])
+          getMovieById(job.castAs[JobKind.GetMovieById])
         case JobKind.GetMovieByIdWithCountingTag =>
-          getMovieByIdWithCounting(job.as[JobKind.GetMovieByIdWithCounting])
+          getMovieByIdWithCounting(job.castAs[JobKind.GetMovieByIdWithCounting])
         case JobKind.CreateMovieTag =>
-          createMovie(job.as[JobKind.CreateMovie])
+          createMovie(job.castAs[JobKind.CreateMovie])
         case JobKind.GetFileContentTag =>
-          getFileContent(job.as[JobKind.GetFileContent])
+          getFileContent(job.castAs[JobKind.GetFileContent])
         case JobKind.ReadTwoFilesInParallelTag =>
-          readTwoFilesInParallel(job.as[JobKind.ReadTwoFilesInParallel])
+          readTwoFilesInParallel(job.castAs[JobKind.ReadTwoFilesInParallel])
         case JobKind.FetchCompanyDataTag =>
-          fetchCompanyData(job.as[JobKind.FetchCompanyData])
+          fetchCompanyData(job.castAs[JobKind.FetchCompanyData])
         case JobKind.FetchJsonObjectTag =>
-          fetchJsonObject(job.as[JobKind.FetchJsonObject])
+          fetchJsonObject(job.castAs[JobKind.FetchJsonObject])
 
   private def worker[F[_]: { Async as async, Logger as logger }](
       workerId: Int,
@@ -179,9 +198,10 @@ object HttpWorker:
       serverStateUpdateService: ServerStateUpdateService[F],
       queue: Queue[F, HttpWorker.Job[F]],
       supervisor: Supervisor[F],
+      actorMemCache: MemCache[F, Long, MovieDbModel.Actor],
   ): F[Unit] =
     val jobExecutor: JobExecutor[F] =
-      JobExecutor(mr, apiClient, fileSystemService, serverStateUpdateService)
+      JobExecutor(mr, apiClient, fileSystemService, serverStateUpdateService, actorMemCache)
 
     val numberOfWorkers = backendServer.getNumberOfWorkers
     (0 until numberOfWorkers).toVector

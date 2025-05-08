@@ -29,10 +29,14 @@ object AppConfig:
     def getHost: String = host
     def getPort: Int = port.port
 
-  final case class BackendServerConfig(private val numberOfWorkers: Int, private val boundedQueueCapacity: Int)
-      derives ConfigReader:
+  final case class BackendServerConfig(
+      private val numberOfWorkers: Int,
+      private val boundedQueueCapacity: Int,
+      private val actorMemCacheCleanupDurationInMillis: Int,
+  ) derives ConfigReader:
     def getNumberOfWorkers: Int = numberOfWorkers
     def getBoundedQueueCapacity: Int = boundedQueueCapacity
+    def getActorMemCacheCleanupDurationInMillis: Int = actorMemCacheCleanupDurationInMillis
 
   final case class AppConfig(
       private val name: String,
