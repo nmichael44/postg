@@ -32,11 +32,15 @@ object AppConfig:
   final case class BackendServerConfig(
       private val numberOfWorkers: Int,
       private val boundedQueueCapacity: Int,
+      private val directorMemCacheCleanupDurationInMillis: Int,
       private val actorMemCacheCleanupDurationInMillis: Int,
+      private val movieMemCacheCleanupDurationInMillis: Int,
   ) derives ConfigReader:
     def getNumberOfWorkers: Int = numberOfWorkers
     def getBoundedQueueCapacity: Int = boundedQueueCapacity
+    def getDirectorMemCacheCleanupDurationInMillis: Int = directorMemCacheCleanupDurationInMillis
     def getActorMemCacheCleanupDurationInMillis: Int = actorMemCacheCleanupDurationInMillis
+    def getMovieMemCacheCleanupDurationInMillis: Int = movieMemCacheCleanupDurationInMillis
 
   final case class AppConfig(
       private val name: String,

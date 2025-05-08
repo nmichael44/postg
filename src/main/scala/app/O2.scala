@@ -1,9 +1,9 @@
 package app
 
 object O2 {
-  case class C(x: Int)
+  private case class C(x: Int)
 
-  def g() = {
+  def g(): Unit = {
     println("Entering g")
     lazy val lc = {
       println("Building c")
@@ -17,7 +17,7 @@ object O2 {
     println("Leaving g")
   }
 
-  private def f(c: => C) = {
+  private def f(c: => C): Unit = {
     println("Entering f")
     println(c)
     println("Leaving f")

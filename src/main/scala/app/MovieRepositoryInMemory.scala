@@ -59,7 +59,7 @@ final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepositoryService[
         .toVector
         .groupMap(_._2)(p => Movies(p._1))
 
-  override def getMoviesByIds(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]] =
+  override def getMovieDetails(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]] =
     val e = Map.empty[Long, MovieDbModel.Movie]
     Async[F].delay:
       movieIds.toVector.foldLeft(e) { (m, movieId) =>

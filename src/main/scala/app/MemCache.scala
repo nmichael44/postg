@@ -11,7 +11,6 @@ import scala.collection.immutable.TreeMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.DurationInt
 
-import app.AppConfig.BackendServerConfig
 import org.typelevel.log4cats.Logger
 
 final class MemCache[F[_]: { Temporal, Logger }, K: Ordering, V](
@@ -49,15 +48,8 @@ object MemCache:
       cleanupFiber <- startWorker(r, cleanupDuration, logger)
     } yield MemCache(r, cleanupFiber)
 
-  private def create[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
-      backendServerConfig: BackendServerConfig,
-  ): F[MemCache[F, K, V]] =
-    create(backendServerConfig.getActorMemCacheCleanupDurationInMillis.milliseconds)
-
-  def createResource[F[_]: { Temporal, Logger }, K: Ordering, V](
-      backendServerConfig: BackendServerConfig,
-  ): Resource[F, MemCache[F, K, V]] =
-    Resource.make(create(backendServerConfig))(_.stopCleanupFiber())
+  def createResource[F[_]: { Temporal, Logger }, K: Ordering, V](cleanupDuration: Duration): Resource[F, MemCache[F, K, V]] =
+    Resource.make(create(cleanupDuration))(_.stopCleanupFiber())
 
   private def getSize[F[_]: Functor, K, V](r: Ref[F, TreeMap[K, (V, Option[Instant])]]): F[Int] =
     r.get.map(_.size)

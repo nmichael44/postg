@@ -14,7 +14,7 @@ object PasswordValidator:
     hasCharWithProperty(c => !c.isLetterOrDigit, password)
 
   // Returns a list of reasons why the password was not good enough.
-  // If the sequence is empty then the password was good.
+  // If the sequence is empty, then the password was good.
   def isPasswordGoodEnough(password: String): Seq[String] =
     val vb = Vector.newBuilder[String]
     if !isLongEnough(password) then vb.addOne(s"Password must be at least $PasswordMinLen characters.")

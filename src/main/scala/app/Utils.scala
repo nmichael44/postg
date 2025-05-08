@@ -23,12 +23,12 @@ object Utils:
   private def mkException(field: String): IllegalArgumentException =
     IllegalArgumentException(s"Missing or invalid field '$field'")
 
-  private final val HostKey = "Host"
-  private final val PortKey = "Port"
-  private final val UserKey = "User"
-  private final val PasswordKey = "Password"
-  private final val ServerHostIP = "ServerHostIP"
-  private final val ServerHostPort = "ServerHostPort"
+  inline private val HostKey = "Host"
+  inline private val PortKey = "Port"
+  inline private val UserKey = "User"
+  inline private val PasswordKey = "Password"
+  inline private val ServerHostIP = "ServerHostIP"
+  inline private val ServerHostPort = "ServerHostPort"
 
   def isValidPort(port: Int): Boolean = port > 0 && port < 65536
 

@@ -75,7 +75,7 @@ private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transac
       .lastOrError
       .transact(xa)
 
-  override def getMoviesByIds(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]] =
+  override def getMovieDetails(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]] =
     val movieIdsVec = movieIds.toVector
     val e = Map.empty[Long, MovieDbModel.Movie]
 

@@ -39,7 +39,7 @@ object JobSpecs:
     case DirectorDetailsResult(director: Option[MovieDbModel.Director])
     case ActorDetailsResult(actor: Option[MovieDbModel.Actor])
     case MoviesByDirectorIdResult(movies: Seq[MovieDbModel.Movie])
-    case MovieByIdResult(movie: Option[MovieDbModel.Movie])
+    case MovieDetailsResult(movie: Option[MovieDbModel.Movie])
     case MovieByIdWithCountingResult(movie: Option[MovieDbModel.Movie])
     case CreateMovieResult(movieId: Long)
     case FileContentResult(content: String)

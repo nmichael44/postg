@@ -30,7 +30,9 @@ object HttpWorker:
       apiClient: ExternalApiClientService[F],
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
+      directorMemCache: MemCache[F, Long, MovieDbModel.Director],
       actorMemCache: MemCache[F, Long, MovieDbModel.Actor],
+      movieMemCache: MemCache[F, Long, MovieDbModel.Movie],
   ):
     private def getDirectorsDetailsByName(j: JobKind.GetDirectorsDetailsByName): F[JobResult] =
       val (firstName, lastName) = (j.firstName, j.lastName)
@@ -49,52 +51,83 @@ object HttpWorker:
         directorDetailsMap <- mr.getDirectorDetails(NonEmptyVector.one(directorId))
       } yield JobResult.DirectorDetailsResult(directorDetailsMap.get(directorId))
 
-    private val ActorCacheDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
-
-    private def getActorDetails(j: JobKind.GetActorDetails): F[JobResult] =
-      val actorId = j.actorId
-
+    private def getDetailsWithCache[T](
+        itemName: String,
+        id: Long,
+        cachingDuration: java.time.Duration,
+        cache: MemCache[F, Long, T],
+        f: NonEmptyVector[Long] => F[Map[Long, T]],
+        toJobResult: Option[T] => JobResult,
+    ): F[JobResult] =
       for {
-        _ <- U.logi(s"Fetching actor details for ID: $actorId")
-        cachedActorOpt <- actorMemCache.get(actorId)
-        actorOpt <- cachedActorOpt match {
-          case Some(actor) =>
-            U.logi(s"Actor details for ID: $actorId found in cache.").as(Some(actor))
+        _ <- U.logi(s"Fetching $itemName details for ID: $id")
+        cashedItemOpt <- cache.get(id)
+        itemOpt <- cashedItemOpt match {
+          case Some(item) =>
+            U.logi(s"$itemName details for ID: $id found in cache.").as(Some(item))
           case None =>
-            U.logi(s"Actor details for ID: $actorId not found in cache. Fetching from DB.") *>
-              mr.getActorDetails(NonEmptyVector.one(actorId)) >>= { actorDetailsMap =>
-              actorDetailsMap.get(actorId) match {
-                case Some(actor) =>
-                  U.logi(s"Actor details for ID: $actorId found in DB. Putting in cache.") *>
-                    actorMemCache.put(actorId, actor, ActorCacheDuration).as(Some(actor))
+            U.logi(s"$itemName details for ID: $id not found in cache. Fetching from DB.") *>
+              f(NonEmptyVector.one(id)) >>= { itemDetailsMap =>
+              itemDetailsMap.get(id) match {
+                case Some(item) =>
+                  U.logi(s"$itemName details for ID: $id found in DB. Putting in cache.") *>
+                    cache.put(id, item, cachingDuration).as(Some(item))
                 case None =>
-                  U.logi(s"Actor details for ID: $actorId not found in DB.").as(None)
+                  U.logi(s"$itemName details for ID: $id not found in DB.").as(None)
               }
             }
         }
-      } yield JobResult.ActorDetailsResult(actorOpt)
+      } yield toJobResult(itemOpt)
+
+    private val DirectorCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
 
     private def getMoviesByDirectorId(
         j: JobKind.GetMoviesByDirectorId,
     ): F[JobResult] =
-      val directorId = j.directorId
-      for {
-        _ <- U.logi(s"Fetching movies for director ID: $directorId")
-        moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
-      } yield JobResult.MoviesByDirectorIdResult(moviesMap.getOrElse(directorId, Seq.empty))
+      getDetailsWithCache(
+        "Director",
+        j.directorId,
+        DirectorCachingDuration,
+        directorMemCache,
+        mr.getDirectorDetails,
+        JobResult.DirectorDetailsResult.apply,
+      )
+
+    private val ActorCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
+
+    private def getActorDetails(j: JobKind.GetActorDetails): F[JobResult] =
+      getDetailsWithCache(
+        "Actor",
+        j.actorId,
+        ActorCachingDuration,
+        actorMemCache,
+        mr.getActorDetails,
+        JobResult.ActorDetailsResult.apply,
+      )
+
+    private val MovieCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
 
     private def getMovieById(j: JobKind.GetMovieById): F[JobResult] =
+      getDetailsWithCache(
+        "Movie",
+        j.movieId,
+        MovieCachingDuration,
+        movieMemCache,
+        mr.getMovieDetails,
+        JobResult.MovieDetailsResult.apply,
+      )
+
       val movieId = j.movieId
       for {
         _ <- U.logi(s"Fetching movie details for ID: $movieId")
-        movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
-      } yield JobResult.MovieByIdResult(movieDetailsMap.get(movieId))
+        movieDetailsMap <- mr.getMovieDetails(NonEmptyVector.one(movieId))
+      } yield JobResult.MovieDetailsResult(movieDetailsMap.get(movieId))
 
     private def getMovieByIdWithCounting(j: JobKind.GetMovieByIdWithCounting): F[JobResult] =
       val movieId = j.movieId
       for {
         _ <- U.logi(s"Fetching movie details for ID $movieId with counting.")
-        movieDetailsMap <- mr.getMoviesByIds(NonEmptyVector.one(movieId))
+        movieDetailsMap <- mr.getMovieDetails(NonEmptyVector.one(movieId))
         _ <- movieDetailsMap.nonEmpty.whenA(
           serverStateUpdateService.incrementAndGet(movieId) >>=
             (newCounter => U.logi(s"Counter now is $newCounter")),
@@ -198,10 +231,12 @@ object HttpWorker:
       serverStateUpdateService: ServerStateUpdateService[F],
       queue: Queue[F, HttpWorker.Job[F]],
       supervisor: Supervisor[F],
+      directorMemCache: MemCache[F, Long, MovieDbModel.Director],
       actorMemCache: MemCache[F, Long, MovieDbModel.Actor],
+      movieMemCache: MemCache[F, Long, MovieDbModel.Movie],
   ): F[Unit] =
     val jobExecutor: JobExecutor[F] =
-      JobExecutor(mr, apiClient, fileSystemService, serverStateUpdateService, actorMemCache)
+      JobExecutor(mr, apiClient, fileSystemService, serverStateUpdateService, directorMemCache, actorMemCache, movieMemCache)
 
     val numberOfWorkers = backendServer.getNumberOfWorkers
     (0 until numberOfWorkers).toVector
