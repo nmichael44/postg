@@ -172,28 +172,17 @@ object HttpWorker:
 
     def executeJob(job: JobKind): F[JobResult] =
       (job.tag: @switch) match
-        case JobKind.GetDirectorsDetailsByNameTag =>
-          getDirectorsDetailsByName(job.castAs[JobKind.GetDirectorsDetailsByName])
-        case JobKind.GetDirectorDetailsTag =>
-          getDirectorDetails(job.castAs[JobKind.GetDirectorDetails])
-        case JobKind.GetActorDetailsTag =>
-          getActorDetails(job.castAs[JobKind.GetActorDetails])
-        case JobKind.GetMoviesByDirectorTag =>
-          getMoviesByDirector(job.castAs[JobKind.GetMoviesByDirector])
-        case JobKind.GetMovieTag =>
-          getMovie(job.castAs[JobKind.GetMovie])
-        case JobKind.GetMovieWithCountingTag =>
-          getMovieWithCounting(job.castAs[JobKind.GetMovieWithCounting])
-        case JobKind.CreateMovieTag =>
-          createMovie(job.castAs[JobKind.CreateMovie])
-        case JobKind.GetFileContentTag =>
-          getFileContent(job.castAs[JobKind.GetFileContent])
-        case JobKind.ReadTwoFilesInParallelTag =>
-          readTwoFilesInParallel(job.castAs[JobKind.ReadTwoFilesInParallel])
-        case JobKind.FetchCompanyDataTag =>
-          fetchCompanyData(job.castAs[JobKind.FetchCompanyData])
-        case JobKind.FetchJsonObjectTag =>
-          fetchJsonObject(job.castAs[JobKind.FetchJsonObject])
+        case JobKind.GetDirectorsDetailsByNameTag => getDirectorsDetailsByName(job.castAs[JobKind.GetDirectorsDetailsByName])
+        case JobKind.GetDirectorDetailsTag => getDirectorDetails(job.castAs[JobKind.GetDirectorDetails])
+        case JobKind.GetActorDetailsTag => getActorDetails(job.castAs[JobKind.GetActorDetails])
+        case JobKind.GetMoviesByDirectorTag => getMoviesByDirector(job.castAs[JobKind.GetMoviesByDirector])
+        case JobKind.GetMovieTag => getMovie(job.castAs[JobKind.GetMovie])
+        case JobKind.GetMovieWithCountingTag => getMovieWithCounting(job.castAs[JobKind.GetMovieWithCounting])
+        case JobKind.CreateMovieTag => createMovie(job.castAs[JobKind.CreateMovie])
+        case JobKind.GetFileContentTag => getFileContent(job.castAs[JobKind.GetFileContent])
+        case JobKind.ReadTwoFilesInParallelTag => readTwoFilesInParallel(job.castAs[JobKind.ReadTwoFilesInParallel])
+        case JobKind.FetchCompanyDataTag => fetchCompanyData(job.castAs[JobKind.FetchCompanyData])
+        case JobKind.FetchJsonObjectTag => fetchJsonObject(job.castAs[JobKind.FetchJsonObject])
 
   private def worker[F[_]: { Async as async, Logger as logger }](
       workerId: Int,
