@@ -1,7 +1,5 @@
 package app
 
-import scala.annotation.switch
-
 import io.circe.Json
 
 object JobSpecs:
@@ -10,10 +8,9 @@ object JobSpecs:
         extends JobKind(JobKind.GetDirectorsDetailsByNameTag, "GetDirectorsDetailsByName")
     case GetDirectorDetails(directorId: Long) extends JobKind(JobKind.GetDirectorDetailsTag, "GetDirectorDetails")
     case GetActorDetails(actorId: Long) extends JobKind(JobKind.GetActorDetailsTag, "GetActorDetails")
-    case GetMoviesByDirectorId(directorId: Long) extends JobKind(JobKind.GetMoviesByDirectorIdTag, "GetMoviesByDirectorId")
-    case GetMovieById(movieId: Long) extends JobKind(JobKind.GetMovieByIdTag, "GetMovieById")
-    case GetMovieByIdWithCounting(movieId: Long)
-        extends JobKind(JobKind.GetMovieByIdWithCountingTag, "GetMovieByIdWithCounting")
+    case GetMoviesByDirector(directorId: Long) extends JobKind(JobKind.GetMoviesByDirectorTag, "GetMoviesByDirectorId")
+    case GetMovie(movieId: Long) extends JobKind(JobKind.GetMovieTag, "GetMovie")
+    case GetMovieWithCounting(movieId: Long) extends JobKind(JobKind.GetMovieWithCountingTag, "GetMovieWithCounting")
     case CreateMovie(title: String, year: Int) extends JobKind(JobKind.CreateMovieTag, "CreateMovie")
     case GetFileContent(fileName: String) extends JobKind(JobKind.GetFileContentTag, "GetFileContent")
     case ReadTwoFilesInParallel(fileName1: String, fileName2: String)
@@ -25,9 +22,9 @@ object JobSpecs:
     inline val GetDirectorsDetailsByNameTag = 0
     inline val GetDirectorDetailsTag = 1
     inline val GetActorDetailsTag = 2
-    inline val GetMoviesByDirectorIdTag = 3
-    inline val GetMovieByIdTag = 4
-    inline val GetMovieByIdWithCountingTag = 5
+    inline val GetMoviesByDirectorTag = 3
+    inline val GetMovieTag = 4
+    inline val GetMovieWithCountingTag = 5
     inline val CreateMovieTag = 6
     inline val GetFileContentTag = 7
     inline val ReadTwoFilesInParallelTag = 8
@@ -38,9 +35,9 @@ object JobSpecs:
     case DirectorsDetailsByNameResult(directors: Seq[MovieDbModel.Director])
     case DirectorDetailsResult(director: Option[MovieDbModel.Director])
     case ActorDetailsResult(actor: Option[MovieDbModel.Actor])
-    case MoviesByDirectorIdResult(movies: Seq[MovieDbModel.Movie])
+    case MoviesByDirectorResult(movies: Seq[MovieDbModel.Movie])
     case MovieDetailsResult(movie: Option[MovieDbModel.Movie])
-    case MovieByIdWithCountingResult(movie: Option[MovieDbModel.Movie])
+    case MovieWithCountingResult(movie: Option[MovieDbModel.Movie])
     case CreateMovieResult(movieId: Long)
     case FileContentResult(content: String)
     case TwoFilesInParallelResult(content: String)

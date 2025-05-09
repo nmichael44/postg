@@ -12,8 +12,8 @@ import scala.concurrent.duration.*
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{AppConfig, BackendServerConfig}
 import app.JobSpecs.{JobKind, JobResult}
-import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovieById, GetMovieByIdWithCounting, GetMoviesByDirectorId, ReadTwoFilesInParallel}
-import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieDetailsResult, MovieByIdWithCountingResult, MoviesByDirectorIdResult, TwoFilesInParallelResult}
+import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, ReadTwoFilesInParallel}
+import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieWithCountingResult, MovieDetailsResult, MoviesByDirectorResult, TwoFilesInParallelResult}
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
@@ -167,38 +167,38 @@ object MovieApp:
 
   private object yearQueryParamDecoderMatcher extends QueryParamDecoderMatcher[Int]("year")
 
-  private def getMoviesByDirectorId[F[_]: { Async, Logger as logger }](
+  private def getMoviesByDirector[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
       directorId: Long,
   ): F[WebServiceResult] =
-    jobHandler[F, MoviesByDirectorIdResult](
+    jobHandler[F, MoviesByDirectorResult](
       "Fetching movies by director Id.",
       serverState,
-      GetMoviesByDirectorId(directorId),
+      GetMoviesByDirector(directorId),
       mvs => WebServiceResult.OkJsonRes(mvs.movies.asJson),
     )
 
-  private def getMovieById[F[_]: { Async, Logger as logger }](
+  private def getMovie[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
       movieId: Long,
   ): F[WebServiceResult] =
     jobHandler[F, MovieDetailsResult](
       "Fetching movie by Id.",
       serverState,
-      GetMovieById(movieId),
+      GetMovie(movieId),
       _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!")) { mv =>
         WebServiceResult.OkJsonRes(mv.asJson)
       },
     )
 
-  private def getMovieByIdWithCounting[F[_]: { Async, Logger as logger }](
+  private def getMovieWithCounting[F[_]: { Async, Logger as logger }](
       movieId: Long,
       serverState: ServerState[F],
   ): F[WebServiceResult] =
-    jobHandler[F, MovieByIdWithCountingResult](
+    jobHandler[F, MovieWithCountingResult](
       "Fetching movie by Id with counting.",
       serverState,
-      GetMovieByIdWithCounting(movieId),
+      GetMovieWithCounting(movieId),
       _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!"))(mv =>
         WebServiceResult.OkJsonRes(mv.asJson),
       ),
@@ -271,11 +271,11 @@ object MovieApp:
     case GET -> Root / "getActor" / LongVar(actorId) =>
       getActorDetails(serverState, actorId)
     case GET -> Root / "getMoviesByDirector" / LongVar(directorId) =>
-      getMoviesByDirectorId(serverState, directorId)
-    case GET -> Root / "getMovieById" / LongVar(movieId) =>
-      getMovieById(serverState, movieId)
-    case GET -> Root / "getMovieByIdWithCounting" / LongVar(movieId) =>
-      getMovieByIdWithCounting(movieId, serverState)
+      getMoviesByDirector(serverState, directorId)
+    case GET -> Root / "getMovie" / LongVar(movieId) =>
+      getMovie(serverState, movieId)
+    case GET -> Root / "getMovieWithCounting" / LongVar(movieId) =>
+      getMovieWithCounting(movieId, serverState)
     case POST -> Root / "createMovie" :? titleQueryParamDecoderMatcher(
           title,
         ) +& yearQueryParamDecoderMatcher(year) =>

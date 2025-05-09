@@ -42,15 +42,6 @@ object HttpWorker:
         directorsDetails <- mr.getDirectorsDetails(firstName, lastName)
       } yield JobResult.DirectorsDetailsByNameResult(directorsDetails)
 
-    private def getDirectorDetails(
-        j: JobKind.GetDirectorDetails,
-    ): F[JobResult] =
-      val directorId = j.directorId
-      for {
-        _ <- U.logi("Fetching director details by id")
-        directorDetailsMap <- mr.getDirectorDetails(NonEmptyVector.one(directorId))
-      } yield JobResult.DirectorDetailsResult(directorDetailsMap.get(directorId))
-
     private def getDetailsWithCache[T](
         itemName: String,
         id: Long,
@@ -81,9 +72,7 @@ object HttpWorker:
 
     private val DirectorCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
 
-    private def getMoviesByDirectorId(
-        j: JobKind.GetMoviesByDirectorId,
-    ): F[JobResult] =
+    private def getDirectorDetails(j: JobKind.GetDirectorDetails): F[JobResult] =
       getDetailsWithCache(
         "Director",
         j.directorId,
@@ -92,6 +81,13 @@ object HttpWorker:
         mr.getDirectorDetails,
         JobResult.DirectorDetailsResult.apply,
       )
+
+    private def getMoviesByDirector(j: JobKind.GetMoviesByDirector): F[JobResult] =
+      val directorId = j.directorId
+      for {
+        _ <- U.logi(s"Fetching movies for director ID: $directorId")
+        moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
+      } yield JobResult.MoviesByDirectorResult(moviesMap.getOrElse(directorId, Seq.empty))
 
     private val ActorCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
 
@@ -107,7 +103,7 @@ object HttpWorker:
 
     private val MovieCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
 
-    private def getMovieById(j: JobKind.GetMovieById): F[JobResult] =
+    private def getMovie(j: JobKind.GetMovie): F[JobResult] =
       getDetailsWithCache(
         "Movie",
         j.movieId,
@@ -123,7 +119,7 @@ object HttpWorker:
         movieDetailsMap <- mr.getMovieDetails(NonEmptyVector.one(movieId))
       } yield JobResult.MovieDetailsResult(movieDetailsMap.get(movieId))
 
-    private def getMovieByIdWithCounting(j: JobKind.GetMovieByIdWithCounting): F[JobResult] =
+    private def getMovieWithCounting(j: JobKind.GetMovieWithCounting): F[JobResult] =
       val movieId = j.movieId
       for {
         _ <- U.logi(s"Fetching movie details for ID $movieId with counting.")
@@ -132,7 +128,7 @@ object HttpWorker:
           serverStateUpdateService.incrementAndGet(movieId) >>=
             (newCounter => U.logi(s"Counter now is $newCounter")),
         )
-      } yield JobResult.MovieByIdWithCountingResult(movieDetailsMap.get(movieId))
+      } yield JobResult.MovieWithCountingResult(movieDetailsMap.get(movieId))
 
     private def createMovie(j: JobKind.CreateMovie): F[JobResult] =
       val (title, year) = (j.title, j.year)
@@ -169,7 +165,7 @@ object HttpWorker:
         _ <- U.logi("Fetching some json object recursively.")
         obj <- apiClient
           .fetchAsJson[MovieDbModel.Movie](
-            Uri.unsafeFromString("http://127.0.0.1:8080/getMovieById/0"),
+            Uri.unsafeFromString("http://127.0.0.1:8080/getMovie/0"),
           )
           .map(_.asJson)
       } yield JobResult.JsonObjectResult(obj)
@@ -182,12 +178,12 @@ object HttpWorker:
           getDirectorDetails(job.castAs[JobKind.GetDirectorDetails])
         case JobKind.GetActorDetailsTag =>
           getActorDetails(job.castAs[JobKind.GetActorDetails])
-        case JobKind.GetMoviesByDirectorIdTag =>
-          getMoviesByDirectorId(job.castAs[JobKind.GetMoviesByDirectorId])
-        case JobKind.GetMovieByIdTag =>
-          getMovieById(job.castAs[JobKind.GetMovieById])
-        case JobKind.GetMovieByIdWithCountingTag =>
-          getMovieByIdWithCounting(job.castAs[JobKind.GetMovieByIdWithCounting])
+        case JobKind.GetMoviesByDirectorTag =>
+          getMoviesByDirector(job.castAs[JobKind.GetMoviesByDirector])
+        case JobKind.GetMovieTag =>
+          getMovie(job.castAs[JobKind.GetMovie])
+        case JobKind.GetMovieWithCountingTag =>
+          getMovieWithCounting(job.castAs[JobKind.GetMovieWithCounting])
         case JobKind.CreateMovieTag =>
           createMovie(job.castAs[JobKind.CreateMovie])
         case JobKind.GetFileContentTag =>
