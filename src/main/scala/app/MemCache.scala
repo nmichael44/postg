@@ -7,25 +7,25 @@ import cats.effect.syntax.all.*
 import cats.implicits.*
 
 import java.time.Instant
-import scala.collection.immutable.TreeMap
+import scala.collection.immutable.{TreeMap, TreeSet}
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.DurationInt
 
 import org.typelevel.log4cats.Logger
 
 final class MemCache[F[_]: { Temporal, Logger }, K: Ordering, V](
-    r: Ref[F, TreeMap[K, (V, Option[Instant])]],
+    r: Ref[F, (TreeMap[K, (V, Option[Instant])], TreeSet[(Instant, K)])],
     cleanupFiber: Fiber[F, Throwable, Nothing],
 ):
   def get(k: K): F[Option[V]] =
     Temporal[F].realTimeInstant.flatMap { now =>
-      r.get.map(m =>
+      r.get.map { (m, _) =>
         m.get(k) match {
           case Some(v, Some(expiry)) => Option.when(now.isBefore(expiry))(v)
           case Some(v, None) => v.some
           case _ => None
-        },
-      )
+        }
+      }
     }
 
   def put(k: K, v: V): F[Unit] =
@@ -36,7 +36,15 @@ final class MemCache[F[_]: { Temporal, Logger }, K: Ordering, V](
 
   private def putAux(k: K, v: V, durationOpt: Option[java.time.Duration]): F[Unit] =
     Temporal[F].realTimeInstant.flatMap { now =>
-      r.modify(m => (m.updated(k, (v, durationOpt.map(now.plus))), ()))
+      r.modify { (m0, s0) =>
+        val newExpiryOpt: Option[Instant] = durationOpt.map(now.plus)
+        val currentExpiryOpt: Option[(V, Option[Instant])] = m0.get(k)
+        val m1 = m0.updated(k, (v, newExpiryOpt))
+
+        val s1Aux = currentExpiryOpt.flatMap(_._2).fold(s0)(currExpiry => s0 - ((currExpiry, k)))
+        val s1 = newExpiryOpt.fold(s1Aux)(newExpiry => s1Aux + ((newExpiry, k)))
+        ((m1, s1), ())
+      }
     }
 
   private def stopCleanupFiber(): F[Unit] = cleanupFiber.cancel
@@ -44,25 +52,27 @@ final class MemCache[F[_]: { Temporal, Logger }, K: Ordering, V](
 object MemCache:
   private def create[F[_]: { Temporal, Logger as logger }, K: Ordering, V](cleanupDuration: Duration): F[MemCache[F, K, V]] =
     for {
-      r <- Ref.of(TreeMap.empty[K, (V, Option[Instant])])
+      r <- Ref.of((TreeMap.empty[K, (V, Option[Instant])], TreeSet.empty[(Instant, K)]))
       cleanupFiber <- startWorker(r, cleanupDuration, logger)
     } yield MemCache(r, cleanupFiber)
 
   def createResource[F[_]: { Temporal, Logger }, K: Ordering, V](cleanupDuration: Duration): Resource[F, MemCache[F, K, V]] =
     Resource.make(create(cleanupDuration))(_.stopCleanupFiber())
 
-  private def getSize[F[_]: Functor, K, V](r: Ref[F, TreeMap[K, (V, Option[Instant])]]): F[Int] =
-    r.get.map(_.size)
+  private def getSize[F[_]: Functor, K, V](
+      r: Ref[F, (TreeMap[K, (V, Option[Instant])], TreeSet[(Instant, K)])],
+  ): F[(Int, Int)] =
+    r.get.map((m, s) => (m.size, s.size))
 
   private def reportSize[F[_]: FlatMap, K, V](
-      r: Ref[F, TreeMap[K, (V, Option[Instant])]],
+      r: Ref[F, (TreeMap[K, (V, Option[Instant])], TreeSet[(Instant, K)])],
       when: String,
       logger: Logger[F],
   ): F[Unit] =
-    getSize(r) >>= (siz => logger.info(s"Size of cache $when worker touched it: $siz"))
+    getSize(r) >>= { (mSiz, tSiz) => logger.info(s"Sizes of cache $when worker touched it: ($mSiz, $tSiz).") }
 
   private def worker[F[_]: Temporal as temporal, K: Ordering, V](
-      r: Ref[F, TreeMap[K, (V, Option[Instant])]],
+      r: Ref[F, (TreeMap[K, (V, Option[Instant])], TreeSet[(Instant, K)])],
       cleanupInterval: Duration,
       logger: Logger[F],
   ): F[Nothing] =
@@ -72,24 +82,28 @@ object MemCache:
       _ <- logger.info("Cleanup worker is awake and going to work...")
       _ <- reportSize(r, "before", logger)
       now <- temporal.realTimeInstant
-      _ <- r.update { m =>
-        m.filter {
-          case (_, (_, Some(expiry))) => now.isBefore(expiry)
-          case _ => true
-        }
+      _ <- r.update { (m0, s0) =>
+        val expiredEntries = s0.view.takeWhile((expiry, _) => !now.isBefore(expiry)).toVector
+
+        val m1 = m0 -- expiredEntries.view.map(_._2)
+        val s1 = s0 -- expiredEntries
+        (m1, s1)
       }
       _ <- reportSize(r, "after", logger)
-    } yield ()).foreverM
+    } yield ()).handleErrorWith { e =>
+      // We don't go paranoid and start worrying about errors being thrown from the logger...
+      logger.error(e)("MemCache cleanup worker encountered an error during a cycle.  Worker will continue to run.")
+    }.foreverM
 
   private def startWorker[F[_]: Temporal, K: Ordering, V](
-      r: Ref[F, TreeMap[K, (V, Option[Instant])]],
+      r: Ref[F, (TreeMap[K, (V, Option[Instant])], TreeSet[(Instant, K)])],
       cleanupInterval: Duration,
       logger: Logger[F],
   ): F[Fiber[F, Throwable, Nothing]] = for {
     _ <- logger.info("Starting mem cache worker...")
     cleanupFiber <- worker(r, cleanupInterval, logger).start
-    _ <- logger.info("Worker is running...")
-    _ <- logger.info(s"Fiber is '${cleanupFiber.toString}'.")
+    _ <- logger.info("Worker started.")
+    _ <- logger.info(s"Fiber is '$cleanupFiber'.")
   } yield cleanupFiber
 
   def run[F[_]: { Temporal as temporal, Logger as logger }]: F[ExitCode] =
