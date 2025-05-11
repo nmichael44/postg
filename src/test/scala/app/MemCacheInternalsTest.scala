@@ -134,8 +134,6 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
 
       createCache[String, Int](capacity = cacheCapacity, cleanupDuration = cleanupInterval).use { cache =>
         for {
-          nowAtStart <- IO.realTimeInstant
-
           _ <- cache.put(kExp1, vExp1, exp1Duration) // seq 0
           _ <- cache.put(kNoExp, vNoExp) // seq 1
           _ <- cache.put(kExp2, vExp2, exp2Duration) // seq 2
