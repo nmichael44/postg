@@ -215,7 +215,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
 
       val shortExpiryPairs = (1 to n1).map(i => (s"Short$i", i)).toVector
       val longExpiryPairs = (1 to n2).map(i => (s"Long$i", i * 100)).toVector
-      val noExpiryPairs = (1 to n3).map(i => (s"NoExp$i", i * 1000)).toVector
+      val noExpiryPairs = (1 to n3).map(i => (s"NoExp$i", i * 10_000)).toVector
 
       createCache[String, Int](capacity = cacheCapacity, cleanupDuration = cleanupInterval).use { cache =>
         for {
@@ -262,7 +262,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
 
       val shortExpiryPairs = (1 to n1).map(i => (s"ShortPar$i", i)).toVector // Changed key prefix for uniqueness
       val longExpiryPairs = (1 to n2).map(i => (s"LongPar$i", i * 100)).toVector
-      val noExpiryPairs = (1 to n3).map(i => (s"NoExpPar$i", i * 1000)).toVector
+      val noExpiryPairs = (1 to n3).map(i => (s"NoExpPar$i", i * 10_000)).toVector
 
       createCache[String, Int](capacity = cacheCapacity, cleanupDuration = cleanupInterval).use { cache =>
         for {
@@ -294,9 +294,6 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             // Expiry set should only contain long expiry items
             (expirySet.size shouldBe longExpiryPairs.length) ~&> // n2
             // Assertion on seqCounter
-            // With parallel operations, the exact final seqCounter is non-deterministic
-            // as it depends on the interleaving of puts/gets.
-            // We can assert it's at least the number of operations.
             (currentSeqCounter shouldBe (n1 + n2 + n3 + m1 + m2)) ~&>
             succeed
       }
