@@ -32,25 +32,51 @@ object AppConfig:
   final case class BackendServerConfig(
       private val numberOfWorkers: Int,
       private val boundedQueueCapacity: Int,
-      private val directorMemCacheCleanupDurationInMillis: Int,
-      private val actorMemCacheCleanupDurationInMillis: Int,
-      private val movieMemCacheCleanupDurationInMillis: Int,
   ) derives ConfigReader:
     def getNumberOfWorkers: Int = numberOfWorkers
     def getBoundedQueueCapacity: Int = boundedQueueCapacity
-    def getDirectorMemCacheCleanupDurationInMillis: Int = directorMemCacheCleanupDurationInMillis
-    def getActorMemCacheCleanupDurationInMillis: Int = actorMemCacheCleanupDurationInMillis
-    def getMovieMemCacheCleanupDurationInMillis: Int = movieMemCacheCleanupDurationInMillis
+
+  final case class DirectorMemCacheConfig(
+      private val capacity: Int,
+      private val cleanupDurationInMillis: Int,
+  ) derives ConfigReader:
+    def getCapacity: Int = capacity
+    def getCleanupDurationInMillis: Int = cleanupDurationInMillis
+
+  final case class ActorMemCacheConfig(
+      private val capacity: Int,
+      private val cleanupDurationInMillis: Int,
+  ) derives ConfigReader:
+    def getCapacity: Int = capacity
+    def getCleanupDurationInMillis: Int = cleanupDurationInMillis
+
+  final case class MovieMemCacheConfig(
+      private val capacity: Int,
+      private val cleanupDurationInMillis: Int,
+  ) derives ConfigReader:
+    def getCapacity: Int = capacity
+    def getCleanupDurationInMillis: Int = cleanupDurationInMillis
+
+  final case class MemCacheConfig(
+      private val directorMemCacheConfig: DirectorMemCacheConfig,
+      private val actorMemCacheConfig: ActorMemCacheConfig,
+      private val movieMemCacheConfig: MovieMemCacheConfig,
+  ) derives ConfigReader:
+    def getDirectorMemCacheConfig: DirectorMemCacheConfig = directorMemCacheConfig
+    def getActorMemCacheConfig: ActorMemCacheConfig = actorMemCacheConfig
+    def getMovieMemCacheConfig: MovieMemCacheConfig = movieMemCacheConfig
 
   final case class AppConfig(
       private val name: String,
       private val dbConnectionConfig: DbConnectionConfig,
       private val serverConnectionConfig: ServerConnectionConfig,
       private val backendServerConfig: BackendServerConfig,
+      private val memCacheConfig: MemCacheConfig,
   ) derives ConfigReader:
     def getDbConnectionConfig: DbConnectionConfig = dbConnectionConfig
     def getServerConnectionConfig: ServerConnectionConfig = serverConnectionConfig
     def getBackendServerConfig: BackendServerConfig = backendServerConfig
+    def getMemCacheConfig: MemCacheConfig = memCacheConfig
 
   final case class Port(port: Int) extends AnyVal
 

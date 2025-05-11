@@ -10,7 +10,7 @@ import scala.annotation.switch
 import scala.concurrent.duration.*
 
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
-import app.AppConfig.{AppConfig, BackendServerConfig}
+import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MovieMemCacheConfig}
 import app.JobSpecs.{JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, ReadTwoFilesInParallel}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
@@ -325,24 +325,30 @@ object MovieApp:
     }
 
   private def createDirectorMemCache[F[_]: { Temporal, Logger }](
-      backendServerConfig: BackendServerConfig,
+      directorMemCacheConfig: DirectorMemCacheConfig,
   ): Resource[F, MemCache[F, Long, MovieDbModel.Director]] =
     MemCache.createResource[F, Long, MovieDbModel.Director](
-      backendServerConfig.getDirectorMemCacheCleanupDurationInMillis.milliseconds,
+      "Director MemCache",
+      directorMemCacheConfig.getCapacity,
+      directorMemCacheConfig.getCleanupDurationInMillis.milliseconds,
     )
 
   private def createActorMemCache[F[_]: { Temporal, Logger }](
-      backendServerConfig: BackendServerConfig,
+      actorMemCacheConfig: ActorMemCacheConfig,
   ): Resource[F, MemCache[F, Long, MovieDbModel.Actor]] =
     MemCache.createResource[F, Long, MovieDbModel.Actor](
-      backendServerConfig.getActorMemCacheCleanupDurationInMillis.milliseconds,
+      "Actor MemCache",
+      actorMemCacheConfig.getCapacity,
+      actorMemCacheConfig.getCleanupDurationInMillis.milliseconds,
     )
 
   private def createMovieMemCache[F[_]: { Temporal, Logger }](
-      backendServerConfig: BackendServerConfig,
+      movieMemCacheConfig: MovieMemCacheConfig,
   ): Resource[F, MemCache[F, Long, MovieDbModel.Movie]] =
     MemCache.createResource[F, Long, MovieDbModel.Movie](
-      backendServerConfig.getMovieMemCacheCleanupDurationInMillis.milliseconds,
+      "Movie MemCache",
+      movieMemCacheConfig.getCapacity,
+      movieMemCacheConfig.getCleanupDurationInMillis.milliseconds,
     )
 
   // This is the number of redirects Ember will perform when a response
@@ -394,11 +400,10 @@ object MovieApp:
 
       val coreResources: CoreResources[F] = for {
         appConfig <- configResource
-        backendServerConfig = appConfig.getBackendServerConfig
-        directorMemCache <- createDirectorMemCache[F](backendServerConfig)
-        actorMemCache <- createActorMemCache[F](backendServerConfig)
-        movieMemCache <- createMovieMemCache[F](backendServerConfig)
-        serverState <- Resource.eval(LiveServerState.create[F](backendServerConfig))
+        directorMemCache <- createDirectorMemCache[F](appConfig.getMemCacheConfig.getDirectorMemCacheConfig)
+        actorMemCache <- createActorMemCache[F](appConfig.getMemCacheConfig.getActorMemCacheConfig)
+        movieMemCache <- createMovieMemCache[F](appConfig.getMemCacheConfig.getMovieMemCacheConfig)
+        serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
         supervisor <- Supervisor[F]
         xa <- DoobieObj.xaResource(appConfig)
