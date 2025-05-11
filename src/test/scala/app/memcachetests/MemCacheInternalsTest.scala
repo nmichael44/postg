@@ -1,15 +1,13 @@
-package app
+package app.memcachetests
 
-import cats.effect.testing.scalatest.AsyncIOSpec
+import app.memcachetests.TestUtils.*
 import cats.effect.IO
-
-import java.time.Instant
-import scala.concurrent.duration.*
-
+import cats.effect.testing.scalatest.AsyncIOSpec
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-import TestUtils.*
+import java.time.Instant
+import scala.concurrent.duration.*
 
 final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   "MemCache: Internal State Verification" - {

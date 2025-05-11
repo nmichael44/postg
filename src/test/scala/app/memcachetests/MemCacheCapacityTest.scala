@@ -1,15 +1,16 @@
-package app
+package app.memcachetests
 
 import cats.effect.kernel.Resource
 import cats.effect.testing.scalatest.AsyncIOSpec
 import cats.effect.IO
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Assertion
 
+import app.MemCache
 import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.log4cats.Logger
 import TestUtils.*

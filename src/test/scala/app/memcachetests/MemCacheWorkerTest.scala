@@ -1,15 +1,16 @@
-package app // Or your preferred test package structure
+package app.memcachetests
 
+// Or your preferred test package structure
+
+import app.MemCache
+import app.memcachetests.TestUtils.*
+import cats.effect.IO
 import cats.effect.kernel.Resource
 import cats.effect.testing.scalatest.AsyncIOSpec
-import cats.effect.IO
-
-import scala.concurrent.duration._
-
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-import TestUtils.*
+import scala.concurrent.duration.*
 
 final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   private def createCacheForWorkerTest[K: Ordering, V](

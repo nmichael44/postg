@@ -1,15 +1,13 @@
-package app
+package app.memcachetests
 
+import app.MemCache
 import cats.effect.{IO, Resource}
+import org.scalatest.Assertion
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.noop.NoOpLogger
 
 import java.time.Instant
 import scala.concurrent.duration.*
-import scala.concurrent.duration.FiniteDuration
-
-import org.scalatest.Assertion
-
-import org.typelevel.log4cats.noop.NoOpLogger
-import org.typelevel.log4cats.Logger
 
 object TestUtils:
   // An implicit noop logger.
