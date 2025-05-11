@@ -292,7 +292,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             // Maps should be consistent
             (mainMap.keySet shouldBe lruMap.values.toSet) ~&>
             // Expiry set should only contain long expiry items
-            (expirySet.size shouldBe longExpiryPairs.length) ~&> // n2
+            (expirySet.size shouldBe longExpiryPairs.length) ~&>
             // Assertion on seqCounter
             (currentSeqCounter shouldBe (n1 + n2 + n3 + m1 + m2)) ~&>
             succeed
