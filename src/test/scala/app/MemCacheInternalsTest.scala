@@ -4,7 +4,7 @@ import cats.effect.testing.scalatest.AsyncIOSpec
 import cats.effect.IO
 
 import java.time.Instant
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
@@ -12,7 +12,6 @@ import org.scalatest.matchers.should.Matchers
 import TestUtils.*
 
 final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
-  // Helper function for hasExpired, as used in the user's existing test
   "MemCache: Internal State Verification" - {
     "should reflect correct internal state after puts and gets" in {
       val cacheCapacity = 3
@@ -21,13 +20,10 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       val (k3, v3) = ("key3", 300)
       val k2ExpiryDuration = java.time.Duration.ofSeconds(3600) // 1 hour
 
-      // Assuming TestUtils.createCache has a signature like:
-      // def createCache[K: Ordering, V](capacity: Int, cleanupDuration: FiniteDuration = 1.hour): Resource[IO, MemCache[IO, K, V]]
       createCache[String, Int](capacity = cacheCapacity).use { cache =>
         for {
-          nowBeforePuts <- IO.realTimeInstant // Get current time for expiry calculation
+          nowBeforePuts <- IO.realTimeInstant
 
-          // Sequence of operations
           _ <- cache.put(k1, v1) // seqCounter becomes 1 (k1 -> seq 0)
           _ <- cache.put(k2, v2, k2ExpiryDuration) // seqCounter becomes 2 (k2 -> seq 1)
           _ <- cache.put(k3, v3) // seqCounter becomes 3 (k3 -> seq 2)
