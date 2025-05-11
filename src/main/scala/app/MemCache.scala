@@ -54,7 +54,7 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
   private def evictIfNecessary(m0: TreeMap[K, CacheElem[V]], s0: TreeSet[(Instant, K)], lru0: TreeMap[Long, K]) =
     if m0.size == capacity
     then
-      val minK = lru0.min._2
+      val (_, minK) = lru0.min
       val CacheElem(_, expiryOpt, seqCounter) = m0(minK)
       val m1 = m0 - minK
       val s1 = expiryOpt.fold(s0)(expiry => s0 - ((expiry, minK)))

@@ -1,13 +1,16 @@
 package app.memcachetests
 
-import app.memcachetests.TestUtils.*
-import cats.effect.IO
 import cats.effect.testing.scalatest.AsyncIOSpec
-import org.scalatest.freespec.AsyncFreeSpec
-import org.scalatest.matchers.should.Matchers
+import cats.effect.IO
+import cats.implicits.*
 
 import java.time.Instant
 import scala.concurrent.duration.*
+
+import org.scalatest.freespec.AsyncFreeSpec
+import org.scalatest.matchers.should.Matchers
+
+import app.memcachetests.TestUtils.*
 
 final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   "MemCache: Internal State Verification" - {
@@ -171,6 +174,130 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             // --- Assertion on seqCounter ---
             // Worker cleanup does not change the main seqCounter
             (currentSeqCounter shouldBe 4) ~&>
+            succeed
+      }
+    }
+
+    "should maintain consistency between mainMap and lruMap sizes after various operations" in {
+      val cacheCapacity = 3
+      val (k1, v1) = ("key1", 100)
+      val (k2, v2) = ("key2", 200)
+      val (k3, v3) = ("key3", 300)
+      val (k4, v4) = ("key4", 400)
+      val expirySoon = java.time.Duration.ofMillis(50)
+      val expiryLater = java.time.Duration.ofSeconds(3600)
+
+      createCache[String, Int](capacity = cacheCapacity).use { cache =>
+        for {
+          _ <- cache.put(k1, v1)
+          _ <- cache.put(k2, v2, expirySoon)
+          _ <- cache.put(k3, v3, expiryLater)
+          _ <- cache.get(k1)
+          _ <- cache.put(k4, v4)
+          _ <- IO.sleep(100.millis)
+          internalState <- cache.getInternalCacheState()
+          (mainMap, _, lruMap, _) = internalState
+        } yield (mainMap.size shouldBe lruMap.size) ~&>
+          (mainMap.keySet shouldBe lruMap.values.toSet) ~&>
+          succeed
+      }
+    }
+
+    "should maintain correct state with large capacity after worker cleanup" in {
+      val cacheCapacity = 100
+      val cleanupInterval = 100.millis
+      val shortExpiry = java.time.Duration.ofMillis(50)
+      val longExpiry = java.time.Duration.ofSeconds(3600)
+
+      // Generate test data
+      val (n1, n2, n3) = (40, 30, 20) // Number of items for each category
+      val (m1, m2) = (10, 5) // Number of items to 'get' for LRU update
+
+      val shortExpiryPairs = (1 to n1).map(i => (s"Short$i", i)).toVector
+      val longExpiryPairs = (1 to n2).map(i => (s"Long$i", i * 100)).toVector
+      val noExpiryPairs = (1 to n3).map(i => (s"NoExp$i", i * 1000)).toVector
+
+      createCache[String, Int](capacity = cacheCapacity, cleanupDuration = cleanupInterval).use { cache =>
+        for {
+          // Insert items with different expiry times.
+          _ <- shortExpiryPairs.traverse { case (k, v) => cache.put(k, v, shortExpiry) }
+          _ <- longExpiryPairs.traverse { case (k, v) => cache.put(k, v, longExpiry) }
+          _ <- noExpiryPairs.traverse { case (k, v) => cache.put(k, v) }
+
+          // Access some items to update their LRU status.
+          _ <- longExpiryPairs.take(m1).traverse { case (k, _) => cache.get(k) }
+          _ <- noExpiryPairs.take(m2).traverse { case (k, _) => cache.get(k) }
+
+          // Wait for the cleanup worker to run.
+          _ <- IO.sleep(cleanupInterval + 50.millis)
+
+          internalState <- cache.getInternalCacheState()
+          (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
+        } yield
+          // Short expiry items should be cleaned up
+          (shortExpiryPairs.forall(p => !mainMap.contains(p._1)) shouldBe true) ~&>
+            // Long expiry and no expiry items should remain
+            (longExpiryPairs.forall(p => mainMap.contains(p._1)) shouldBe true) ~&>
+            (noExpiryPairs.forall(p => mainMap.contains(p._1)) shouldBe true) ~&>
+            // Maps should be consistent
+            (mainMap.size shouldBe (n2 + n3)) ~&> // Expected remaining items
+            (lruMap.size shouldBe (n2 + n3)) ~&>
+            (mainMap.keySet shouldBe lruMap.values.toSet) ~&>
+            // Expiry set should only contain long expiry items
+            (expirySet.size shouldBe longExpiryPairs.length) ~&>
+            (currentSeqCounter shouldBe (n1 + n2 + n3 + m1 + m2))
+          succeed
+      }
+    }
+
+    "should maintain correct state with large capacity and parallel operations after worker cleanup" in {
+      val cacheCapacity = 100
+      val cleanupInterval = 100.millis
+      val shortExpiry = java.time.Duration.ofMillis(50)
+      val longExpiry = java.time.Duration.ofSeconds(3600)
+
+      // Generate test data
+      val (n1, n2, n3) = (40, 30, 20) // Number of items for each category
+      val (m1, m2) = (10, 5) // Number of items to 'get' for LRU update
+
+      val shortExpiryPairs = (1 to n1).map(i => (s"ShortPar$i", i)).toVector // Changed key prefix for uniqueness
+      val longExpiryPairs = (1 to n2).map(i => (s"LongPar$i", i * 100)).toVector
+      val noExpiryPairs = (1 to n3).map(i => (s"NoExpPar$i", i * 1000)).toVector
+
+      createCache[String, Int](capacity = cacheCapacity, cleanupDuration = cleanupInterval).use { cache =>
+        for {
+          // Insert items with different expiry times in parallel.
+          _ <- shortExpiryPairs.parTraverse_ { case (k, v) => cache.put(k, v, shortExpiry) }
+          _ <- longExpiryPairs.parTraverse_ { case (k, v) => cache.put(k, v, longExpiry) }
+          _ <- noExpiryPairs.parTraverse_ { case (k, v) => cache.put(k, v) }
+
+          // Access some items to update their LRU status in parallel.
+          _ <- longExpiryPairs.take(m1).parTraverse_ { case (k, _) => cache.get(k) }
+          _ <- noExpiryPairs.take(m2).parTraverse_ { case (k, _) => cache.get(k) }
+
+          // Wait for the cleanup worker to run.
+          _ <- IO.sleep(cleanupInterval + 50.millis)
+
+          internalState <- cache.getInternalCacheState()
+          (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
+        } yield
+          // Short expiry items should be cleaned up
+          (shortExpiryPairs.forall(p => !mainMap.contains(p._1)) shouldBe true) ~&>
+            // Long expiry and no expiry items should remain
+            (longExpiryPairs.forall(p => mainMap.contains(p._1)) shouldBe true) ~&>
+            (noExpiryPairs.forall(p => mainMap.contains(p._1)) shouldBe true) ~&>
+            // Check sizes explicitly
+            (mainMap.size shouldBe (n2 + n3)) ~&> // Expected remaining items
+            (lruMap.size shouldBe (n2 + n3)) ~&>
+            // Maps should be consistent
+            (mainMap.keySet shouldBe lruMap.values.toSet) ~&>
+            // Expiry set should only contain long expiry items
+            (expirySet.size shouldBe longExpiryPairs.length) ~&> // n2
+            // Assertion on seqCounter
+            // With parallel operations, the exact final seqCounter is non-deterministic
+            // as it depends on the interleaving of puts/gets.
+            // We can assert it's at least the number of operations.
+            (currentSeqCounter shouldBe (n1 + n2 + n3 + m1 + m2)) ~&>
             succeed
       }
     }
