@@ -9,12 +9,10 @@ import scala.concurrent.duration._
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
-  import TestUtils.* // Import logger and extension method
+import TestUtils.*
 
-  // Helper to create a MemCache instance for worker tests
-  // It's crucial to set a short cleanupDuration for these tests.
-  def createCacheForWorkerTest[K: Ordering, V](
+final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
+  private def createCacheForWorkerTest[K: Ordering, V](
       name: String = "worker-test-cache",
       capacity: Int = 10,
       cleanupDuration: FiniteDuration, // Explicitly require cleanupDuration
@@ -25,7 +23,6 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
     MemCache.createResource[IO, K, V](name, capacity, cleanupDuration)
 
   "MemCache: Background Cleanup Worker Logic" - {
-    // W1: Worker removes an expired item after cleanup interval.
     "W1: should remove an item that expires before the worker runs" in {
       val cleanupInterval = 100.millis
       val itemExpiry = java.time.Duration.ofMillis(50) // Expires before first cleanup
@@ -48,7 +45,6 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       }
     }
 
-    // W2: Worker does not remove a non-expired item.
     "W2: should not remove an item that has not expired by the time worker runs" in {
       val cleanupInterval = 100.millis
       val itemExpiry = java.time.Duration.ofMillis(500) // Expires well after first cleanup
@@ -87,7 +83,6 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       }
     }
 
-    // W3: Worker correctly handles multiple expired items within one cleanup cycle.
     "W3: should remove multiple items that expire before the worker runs" in {
       val cleanupInterval = 150.millis
       val key1 = "multiExpire1"
@@ -116,7 +111,6 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       }
     }
 
-    // W3b: Worker handles a mix of expired and non-expired items correctly
     "W3b: should only remove expired items, leaving non-expired and no-expiry items" in {
       val cleanupInterval = 100.millis
       val kExp1 = "exp1"

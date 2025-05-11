@@ -1,4 +1,4 @@
-package app // Or your preferred test package structure
+package app
 
 import cats.effect.kernel.Resource
 import cats.effect.testing.scalatest.AsyncIOSpec
@@ -12,43 +12,18 @@ import org.scalatest.Assertion
 
 import org.typelevel.log4cats.noop.NoOpLogger
 import org.typelevel.log4cats.Logger
+import TestUtils.*
 
-// Assuming your MemCache class is in the 'app' package
-// import app.MemCache
-
-object MemCacheCapacityTest {
-  // Define the implicit logger in the companion object
-  implicit val testLogger: Logger[IO] = NoOpLogger[IO]
-
-  // Scala 3 extension method syntax for the sequencing operator
-  extension (leftAssertion: Assertion) {
-    /**
-     * Executes the leftAssertion. If it passes, then executes and returns the rightAssertion. If leftAssertion fails (throws an
-     * exception), rightAssertion will not be evaluated.
-     */
-    def ~&>(rightAssertion: => Assertion): Assertion =
-      rightAssertion
-  }
-}
-
-class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
-
-  import MemCacheCapacityTest.* // Import logger and extension method
-
-  // Helper to create a MemCache instance for capacity tests
-  // Cleanup duration is not critical here.
-  def createCacheWithCapacity[K: Ordering, V](
+final class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
+  private def createCacheWithCapacity[K: Ordering, V](
       capacity: Int,
       name: String = "capacity-test-cache",
       cleanupDuration: FiniteDuration = 1.hour,
-  ): Resource[IO, MemCache[IO, K, V]] = {
+  ): Resource[IO, MemCache[IO, K, V]] =
     require(capacity > 0, "Capacity must be positive for these tests")
     MemCache.createResource[IO, K, V](name, capacity, cleanupDuration)
-  }
 
   "MemCache: Basic Capacity and LRU Eviction" - {
-
-    // C1: Eviction occurs when capacity is exceeded
     "C1: should evict an item when capacity is exceeded" - {
       "evicts the least recently used item (by insertion order if no gets)" in {
         val capacity = 2
@@ -72,7 +47,6 @@ class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Matchers 
       }
     }
 
-    // C2: LRU item is evicted
     "C2: should evict the least recently used (LRU) item" in {
       val capacity = 3
       createCacheWithCapacity[String, Int](capacity).use { cache =>
@@ -101,7 +75,6 @@ class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Matchers 
       }
     }
 
-    // C3: `get` updates LRU status
     "C3: get operation should update the LRU status of an item (making it MRU)" in {
       val capacity = 2
       createCacheWithCapacity[String, Int](capacity).use { cache =>

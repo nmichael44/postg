@@ -89,6 +89,10 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
       cleanupFiber.cancel *>
       logger.info(s"Mem cache '$memCacheName' worker stopped.")
 
+  // This function is to be used for testing only.
+  def getInternalCacheState(): F[(TreeMap[K, CacheElem[V]], TreeSet[(Instant, K)], TreeMap[Long, K], Long)] =
+    r.get.map { case CacheState(m, s, lruMap, seqCounter) => (m, s, lruMap, seqCounter) }
+
 object MemCache:
   private final case class CacheState[K, V](
       mainMap: TreeMap[K, CacheElem[V]],
@@ -97,7 +101,8 @@ object MemCache:
       seqCounter: Long,
   )
 
-  private final case class CacheElem[V](
+  // This is not private because we use it in unit tests.
+  final case class CacheElem[V](
       v: V,
       expiryOpt: Option[Instant],
       seqCount: Long,

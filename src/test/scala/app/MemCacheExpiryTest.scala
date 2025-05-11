@@ -1,61 +1,17 @@
-package app // Or your preferred test package structure
+package app
 
-import cats.effect.kernel.Resource
 import cats.effect.testing.scalatest.AsyncIOSpec
 import cats.effect.IO
 
-import java.time.Instant // For clarity in test expectations if needed
 import scala.concurrent.duration._
 
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.Assertion // Import Assertion type
 
-import org.typelevel.log4cats.noop.NoOpLogger
-import org.typelevel.log4cats.Logger
-
-// Assuming your MemCache class is in the 'app' package
-// import app.MemCache
-
-object MemCacheExpiryTest {
-  // Define the implicit logger in the companion object
-  implicit val testLogger: Logger[IO] = NoOpLogger[IO]
-
-  // Scala 3 extension method syntax for the sequencing operator
-  extension (leftAssertion: Assertion) {
-    /**
-     * Executes the leftAssertion. If it passes, then executes and returns the rightAssertion. If leftAssertion fails (throws an
-     * exception), rightAssertion will not be evaluated. This helps in sequencing assertions and can appease IDE warnings about
-     * "unused expressions".
-     * @param rightAssertion
-     *   The assertion to execute if the left one passes (passed by-name).
-     * @return
-     *   The result of rightAssertion.
-     */
-    def ~&>(rightAssertion: => Assertion): Assertion =
-      // leftAssertion is evaluated by virtue of this method being called on its result.
-      // If it failed, an exception would have been thrown before this point.
-      rightAssertion // Evaluate and return the second assertion
-  }
-}
+import TestUtils.*
 
 final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
-  // Import the implicit logger and the extension methods from the companion object.
-  // Importing all members of MemCacheTest brings the extension method ~&> into scope.
-
-  import MemCacheExpiryTest.*
-
-  // Helper to create a MemCache instance for tests
-  def createCache[K: Ordering, V](
-      name: String = "test-cache",
-      capacity: Int = 10,
-      cleanupDuration: FiniteDuration = 1.hour, // Background cleanup, not directly tested here
-  ): Resource[IO, MemCache[IO, K, V]] =
-    MemCache.createResource[IO, K, V](name, capacity, cleanupDuration)
-
   "MemCache: Basic Expiry Logic (via get)" - {
-
-    // E1: Item expires after its duration
     "E1: should return None for an item whose expiry duration has passed" in {
       val key = "expiredKey"
       val value = 42
@@ -74,7 +30,6 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
       }
     }
 
-    // E2: Item does not expire before its duration
     "E2: should return Some for an item whose expiry duration has not passed" in {
       val key = "activeKey"
       val value = 43
@@ -90,7 +45,6 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
       }
     }
 
-    // E3: Overwriting an item updates its expiry
     "E3: should respect the new expiry when an item is overwritten" - {
       "scenario: extend expiry" in {
         val key = "expiryUpdateKey"
