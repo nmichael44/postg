@@ -66,10 +66,11 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
   private def putAux(k: K, v: V, durationOpt: Option[java.time.Duration]): F[Unit] =
     Temporal[F].realTimeInstant >>= { now =>
       r.update { case CacheState(m, s, lruMap, seqCounter0) =>
-        val (m0, s0, lruMap0) = evictIfNecessary(m, s, lruMap)
+        val existingEntryOpt: Option[CacheElem[V]] = m.get(k)
+
+        val (m0, s0, lruMap0) = existingEntryOpt.map(_ => (m, s, lruMap)).getOrElse(evictIfNecessary(m, s, lruMap))
 
         val newExpiryOpt: Option[Instant] = durationOpt.map(now.plus)
-        val existingEntryOpt: Option[CacheElem[V]] = m0.get(k)
         val m1 = m0.updated(k, CacheElem(v, newExpiryOpt, seqCounter0))
 
         val s1Aux = existingEntryOpt.flatMap(_._2).fold(s0)(currExpiry => s0 - ((currExpiry, k)))

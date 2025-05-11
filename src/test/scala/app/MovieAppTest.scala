@@ -1,23 +1,23 @@
 package app
 
-import cats.effect.{IO, Resource}
-import cats.effect.kernel.MonadCancelThrow
-import cats.syntax.option.*
+//import cats.effect.{IO, Resource}
+//import cats.effect.kernel.MonadCancelThrow
+//import cats.syntax.option.*
+//
+//import java.time.LocalDate
+//import scala.concurrent.ExecutionContext
+//
+//import org.scalatest.flatspec.AsyncFlatSpec
+//import org.scalatest.matchers.should.Matchers
+//
+//import doobie.*
+//import doobie.implicits.*
+//import org.http4s.dsl.Http4sDsl
+//import org.http4s.Request
+//import org.typelevel.log4cats.slf4j.Slf4jLogger
+//import org.typelevel.log4cats.Logger
 
-import java.time.LocalDate
-import scala.concurrent.ExecutionContext
-
-import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
-
-import doobie.*
-import doobie.implicits.*
-import org.http4s.dsl.Http4sDsl
-import org.http4s.Request
-import org.typelevel.log4cats.slf4j.Slf4jLogger
-import org.typelevel.log4cats.Logger
-
-final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
+//final class MovieAppTest extends AsyncFlatSpec with Matchers with Http4sDsl[IO]
 //  implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 //
 //  private val dummyDirector = MovieDbModel.Director(1L, "John", "Doe", LocalDate.of(1970, 1, 1))
