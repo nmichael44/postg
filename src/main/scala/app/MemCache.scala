@@ -22,13 +22,13 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
 ):
   def get(k: K): F[Option[V]] =
     (Temporal[F].realTimeInstant) >>= { now =>
-      r.modify { case x @ CacheState(m0, s0, lruMap0, seqCounter0) =>
+      r.modify { case casheState0 @ CacheState(m0, s0, lruMap0, seqCounter0) =>
         m0.get(k) match {
           case Some(CacheElem(v, expiryOpt, seqCount)) =>
             expiryOpt match {
               // Item has an expiry, AND it is currently expired.
               case Some(expiry) if hasExpired(expiry, now) =>
-                (x, None)
+                (casheState0, None)
               // This case covers two cases:
               //   1. Item has an expiry, AND it is NOT currently expired.
               //   2. Item has NO expiry (expiryOpt is None).
@@ -39,7 +39,8 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
                 val seqCounter1 = seqCounter0 + 1
                 (CacheState(m1, s1, lruMap1, seqCounter1), v.some)
             }
-          case None => (x, None)
+          case None =>
+            (casheState0, None)
         }
       }
     }
