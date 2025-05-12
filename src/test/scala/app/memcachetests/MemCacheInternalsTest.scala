@@ -14,6 +14,32 @@ import app.memcachetests.TestUtils.*
 
 final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   "MemCache: Internal State Verification" - {
+    "should not return expired items -- worker should remove them -- with internal state tests" in {
+      val cleanupInterval = 100.millis
+      val itemExpiry = java.time.Duration.ofMillis(50) // Expires before first cleanup
+      val key = "itemToClean"
+      val value = 1
+
+      createCache[String, Int](cleanupDuration = cleanupInterval).use { cache =>
+        for {
+          _ <- cache.put(key, value, itemExpiry)
+          // Item in the cache will expire at T+50ms. The worker will first run around T+100ms.
+
+          getBeforeWorker <- cache.get(key) // Should be Some(1), expiry check in get is not enough for this test
+
+          // Sleep a bit longer than the expiry period. Add a small buffer to account for scheduling.
+          _ <- IO.sleep(60.millis)
+          getAfterExpiry <- cache.get(key) // Should be None -- get will not return an expired value.
+          (m0, s0, lru0, _) <- cache.getInternalCacheState
+          _ <- IO.sleep(60.millis)
+          getAfterWorker <- cache.get(key) // Should be None -- removed completely from the cache by the worker.
+          (m1, s1, lru1, _) <- cache.getInternalCacheState
+        } yield (getBeforeWorker shouldBe Some(value)) ~&> (getAfterExpiry shouldBe None) ~&> (getAfterWorker shouldBe None) ~&>
+          (m0.size shouldBe 1) ~&> (s0.size shouldBe 1) ~&> (lru0.size shouldBe 1) ~&>
+          (m1.size shouldBe 0) ~&> (s1.size shouldBe 0) ~&> (lru1.size shouldBe 0)
+      }
+    }
+
     "should reflect correct internal state after puts and gets" in {
       val cacheCapacity = 3
       val (k1, v1) = ("key1", 100)
@@ -30,7 +56,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- cache.put(k3, v3) // seqCounter becomes 3 (k3 -> seq 2)
           _ <- cache.get(k1) // k1 accessed, its seq should update to 3. seqCounter becomes 4.
 
-          internalState <- cache.getInternalCacheState()
+          internalState <- cache.getInternalCacheState
           (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
 
           nowAfterOps <- IO.realTimeInstant
@@ -68,8 +94,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
               }
             } ~&>
             // --- Assertion on seqCounter ---
-            (currentSeqCounter shouldBe 4) ~&>
-            succeed
+            (currentSeqCounter shouldBe 4)
       }
     }
 
@@ -87,7 +112,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- cache.put(k3, v3) // k3 -> seq 2, globalSeq -> 3. k1 should be evicted.
           // Cache: k2 (1), k3 (2). LRU: k2
 
-          internalState <- cache.getInternalCacheState()
+          internalState <- cache.getInternalCacheState
           (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
         } yield
           // --- Assertions on mainMap ---
@@ -109,8 +134,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             } ~&>
             // --- Assertion on seqCounter ---
             // put k1 (0->1), put k2 (1->2), put k3 (2->3)
-            (currentSeqCounter shouldBe 3) ~&>
-            succeed
+            (currentSeqCounter shouldBe 3)
       }
     }
 
@@ -140,7 +164,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           // Sleep longer than cleanupInterval to ensure worker runs
           _ <- IO.sleep(cleanupInterval + 75.millis) // e.g., 175ms sleep
 
-          internalState <- cache.getInternalCacheState()
+          internalState <- cache.getInternalCacheState
           (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
 
           nowForExpiryCheck <- IO.realTimeInstant
@@ -173,8 +197,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             } ~&>
             // --- Assertion on seqCounter ---
             // Worker cleanup does not change the main seqCounter
-            (currentSeqCounter shouldBe 4) ~&>
-            succeed
+            (currentSeqCounter shouldBe 4)
       }
     }
 
@@ -195,11 +218,10 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- cache.get(k1)
           _ <- cache.put(k4, v4)
           _ <- IO.sleep(100.millis)
-          internalState <- cache.getInternalCacheState()
+          internalState <- cache.getInternalCacheState
           (mainMap, _, lruMap, _) = internalState
         } yield (mainMap.size shouldBe lruMap.size) ~&>
-          (mainMap.keySet shouldBe lruMap.values.toSet) ~&>
-          succeed
+          (mainMap.keySet shouldBe lruMap.values.toSet)
       }
     }
 
@@ -209,10 +231,10 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       val shortExpiry = java.time.Duration.ofMillis(50)
       val longExpiry = java.time.Duration.ofSeconds(3600)
 
-      // Generate test data
       val (n1, n2, n3) = (40, 30, 20) // Number of items for each category
       val (m1, m2) = (10, 5) // Number of items to 'get' for LRU update
 
+      // Generate test data
       val shortExpiryPairs = (1 to n1).map(i => (s"Short$i", i)).toVector
       val longExpiryPairs = (1 to n2).map(i => (s"Long$i", i * 100)).toVector
       val noExpiryPairs = (1 to n3).map(i => (s"NoExp$i", i * 10_000)).toVector
@@ -231,7 +253,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           // Wait for the cleanup worker to run.
           _ <- IO.sleep(cleanupInterval + 50.millis)
 
-          internalState <- cache.getInternalCacheState()
+          internalState <- cache.getInternalCacheState
           (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
         } yield
           // Short expiry items should be cleaned up
@@ -246,7 +268,6 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             // Expiry set should only contain long expiry items
             (expirySet.size shouldBe longExpiryPairs.length) ~&>
             (currentSeqCounter shouldBe (n1 + n2 + n3 + m1 + m2))
-          succeed
       }
     }
 
@@ -256,11 +277,11 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       val shortExpiry = java.time.Duration.ofMillis(50)
       val longExpiry = java.time.Duration.ofSeconds(3600)
 
-      // Generate test data
       val (n1, n2, n3) = (40, 30, 20) // Number of items for each category
       val (m1, m2) = (10, 5) // Number of items to 'get' for LRU update
 
-      val shortExpiryPairs = (1 to n1).map(i => (s"ShortPar$i", i)).toVector // Changed key prefix for uniqueness
+      // Generate test data
+      val shortExpiryPairs = (1 to n1).map(i => (s"ShortPar$i", i)).toVector
       val longExpiryPairs = (1 to n2).map(i => (s"LongPar$i", i * 100)).toVector
       val noExpiryPairs = (1 to n3).map(i => (s"NoExpPar$i", i * 10_000)).toVector
 
@@ -278,7 +299,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           // Wait for the cleanup worker to run.
           _ <- IO.sleep(cleanupInterval + 50.millis)
 
-          internalState <- cache.getInternalCacheState()
+          internalState <- cache.getInternalCacheState
           (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
         } yield
           // Short expiry items should be cleaned up
@@ -294,8 +315,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             // Expiry set should only contain long expiry items
             (expirySet.size shouldBe longExpiryPairs.length) ~&>
             // Assertion on seqCounter
-            (currentSeqCounter shouldBe (n1 + n2 + n3 + m1 + m2)) ~&>
-            succeed
+            (currentSeqCounter shouldBe (n1 + n2 + n3 + m1 + m2))
       }
     }
   }

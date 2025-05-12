@@ -1,28 +1,16 @@
 package app.memcachetests
 
-// Or your preferred test package structure
-
-import app.MemCache
-import app.memcachetests.TestUtils.*
-import cats.effect.IO
-import cats.effect.kernel.Resource
 import cats.effect.testing.scalatest.AsyncIOSpec
-import org.scalatest.freespec.AsyncFreeSpec
-import org.scalatest.matchers.should.Matchers
+import cats.effect.IO
 
 import scala.concurrent.duration.*
 
+import org.scalatest.freespec.AsyncFreeSpec
+import org.scalatest.matchers.should.Matchers
+
+import app.memcachetests.TestUtils.*
+
 final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
-  private def createCacheForWorkerTest[K: Ordering, V](
-      name: String = "worker-test-cache",
-      capacity: Int = 10,
-      cleanupDuration: FiniteDuration, // Explicitly require cleanupDuration
-  ): Resource[IO, MemCache[IO, K, V]] =
-    require(capacity > 0, "Capacity must be positive.")
-    require(cleanupDuration > Duration.Zero && cleanupDuration < 1.minute, "Cleanup duration should be short for tests.")
-
-    MemCache.createResource[IO, K, V](name, capacity, cleanupDuration)
-
   "MemCache: Background Cleanup Worker Logic" - {
     "W1: should remove an item that expires before the worker runs" in {
       val cleanupInterval = 100.millis
@@ -30,7 +18,7 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       val key = "itemToClean"
       val value = 1
 
-      createCacheForWorkerTest[String, Int](cleanupDuration = cleanupInterval).use { cache =>
+      createCache[String, Int](cleanupDuration = cleanupInterval).use { cache =>
         for {
           _ <- cache.put(key, value, itemExpiry)
           // Item in the cache will expire at T+50ms. The worker will first run around T+100ms.
@@ -52,11 +40,10 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       val key = "itemToKeep"
       val value = 2
 
-      createCacheForWorkerTest[String, Int](cleanupDuration = cleanupInterval).use { cache =>
+      createCache[String, Int](cleanupDuration = cleanupInterval).use { cache =>
         for {
           _ <- cache.put(key, value, itemExpiry)
-          // Item in the cache will expire at T+500ms.
-          // Worker will first run around T+100ms.
+          // Item in the cache will expire at T+500ms. Worker will first run around T+100ms.
 
           // Sleep a bit longer than the cleanupInterval.
           _ <- IO.sleep(cleanupInterval + 10.millis)
@@ -71,10 +58,9 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       val key = "itemWithNoExpiry"
       val value = 3
 
-      createCacheForWorkerTest[String, Int](cleanupDuration = cleanupInterval).use { cache =>
+      createCache[String, Int](cleanupDuration = cleanupInterval).use { cache =>
         for {
-          _ <- cache.put(key, value) // No expiry
-          // Worker will first run around T+100ms.
+          _ <- cache.put(key, value) // No expiry. Worker will first run around T+100ms.
 
           // Sleep a bit longer than the cleanupInterval.
           _ <- IO.sleep(cleanupInterval + 10.millis)
@@ -93,7 +79,7 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       val key3 = "multiKeep" // This one should not expire quickly
       val expiry3 = java.time.Duration.ofMillis(1000)
 
-      createCacheForWorkerTest[String, Int](capacity = 5, cleanupDuration = cleanupInterval).use { cache =>
+      createCache[String, Int](capacity = 5, cleanupDuration = cleanupInterval).use { cache =>
         for {
           _ <- cache.put(key1, 1, expiry1) // Expires at T+50
           _ <- cache.put(key2, 2, expiry2) // Expires at T+100
@@ -123,7 +109,7 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       val kLongExp = "longExp"
       val longExpDur = java.time.Duration.ofMillis(500)
 
-      createCacheForWorkerTest[String, Int](capacity = 10, cleanupDuration = cleanupInterval).use { cache =>
+      createCache[String, Int](capacity = 10, cleanupDuration = cleanupInterval).use { cache =>
         for {
           _ <- cache.put(kExp1, 1, expDur1)
           _ <- cache.put(kNoExp, 2)

@@ -1,10 +1,12 @@
 package app.memcachetests
 
-import app.memcachetests.TestUtils.*
-import cats.effect.IO
 import cats.effect.testing.scalatest.AsyncIOSpec
+import cats.effect.IO
+
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
+
+import app.memcachetests.TestUtils.*
 
 class MemCacheTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   "MemCache: Core get and put operations" - {

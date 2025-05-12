@@ -1,12 +1,14 @@
 package app.memcachetests
 
-import app.memcachetests.TestUtils.*
-import cats.effect.IO
 import cats.effect.testing.scalatest.AsyncIOSpec
+import cats.effect.IO
+
+import scala.concurrent.duration.*
+
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.concurrent.duration.*
+import app.memcachetests.TestUtils.*
 
 final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   "MemCache: Basic Expiry Logic (via get)" - {
@@ -133,9 +135,7 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
             // Sleep past the new expiry time
             _ <- IO.sleep(150.millis)
             get2 <- cache.get(key)
-          } yield
-            // Corrected line with parentheses around the left-hand assertion
-            (get1 shouldBe Some(value1)) ~&> (get2 shouldBe None) // Should be expired
+          } yield (get1 shouldBe Some(value1)) ~&> (get2 shouldBe None) // Should be expired
         }
       }
     }

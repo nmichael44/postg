@@ -22,13 +22,13 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
 ):
   def get(k: K): F[Option[V]] =
     (Temporal[F].realTimeInstant) >>= { now =>
-      r.modify { case casheState0 @ CacheState(m0, s0, lruMap0, seqCounter0) =>
+      r.modify { case cacheState0 @ CacheState(m0, s0, lruMap0, seqCounter0) =>
         m0.get(k) match {
           case Some(CacheElem(v, expiryOpt, seqCount)) =>
             expiryOpt match {
               // Item has an expiry, AND it is currently expired.
               case Some(expiry) if hasExpired(expiry, now) =>
-                (casheState0, None)
+                (cacheState0, None)
               // This case covers two cases:
               //   1. Item has an expiry, AND it is NOT currently expired.
               //   2. Item has NO expiry (expiryOpt is None).
@@ -40,7 +40,7 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
                 (CacheState(m1, s1, lruMap1, seqCounter1), v.some)
             }
           case None =>
-            (casheState0, None)
+            (cacheState0, None)
         }
       }
     }
@@ -68,7 +68,7 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
       r.update { case CacheState(m, s, lruMap, seqCounter0) =>
         val existingEntryOpt: Option[CacheElem[V]] = m.get(k)
 
-        val (m0, s0, lruMap0) = existingEntryOpt.map(_ => (m, s, lruMap)).getOrElse(evictIfNecessary(m, s, lruMap))
+        val (m0, s0, lruMap0) = if existingEntryOpt.isDefined then (m, s, lruMap) else evictIfNecessary(m, s, lruMap)
 
         val newExpiryOpt: Option[Instant] = durationOpt.map(now.plus)
         val m1 = m0.updated(k, CacheElem(v, newExpiryOpt, seqCounter0))
@@ -90,7 +90,7 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
       logger.info(s"Mem cache '$memCacheName' worker stopped.")
 
   // This function is to be used for testing only.
-  def getInternalCacheState(): F[(TreeMap[K, CacheElem[V]], TreeSet[(Instant, K)], TreeMap[Long, K], Long)] =
+  def getInternalCacheState: F[(TreeMap[K, CacheElem[V]], TreeSet[(Instant, K)], TreeMap[Long, K], Long)] =
     r.get.map { case CacheState(m, s, lruMap, seqCounter) => (m, s, lruMap, seqCounter) }
 
 object MemCache:
@@ -134,11 +134,10 @@ object MemCache:
   private def getSize[F[_]: Functor, K, V](r: Ref[F, CacheState[K, V]]): F[(Int, Int)] =
     r.get.map(cs => (cs.mainMap.size, cs.expirySet.size))
 
-  private def reportSize[F[_]: FlatMap, K, V](
+  private def reportSize[F[_]: { FlatMap, Logger as logger }, K, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
       when: String,
-      logger: Logger[F],
   ): F[Unit] =
     getSize(r) >>= { (mSiz, tSiz) => logger.info(s"Sizes of cache '$memCacheName' $when worker touched it: ($mSiz, $tSiz).") }
 
@@ -151,7 +150,7 @@ object MemCache:
       _ <- logger.info(s"Cleanup worker for '$memCacheName', going to sleep until it's time to work...")
       _ <- temporal.sleep(cleanupInterval)
       _ <- logger.info(s"Cleanup worker for '$memCacheName', is awake and going to work...")
-      _ <- reportSize(memCacheName, r, "before", logger)
+      _ <- reportSize(memCacheName, r, "before")
       now <- temporal.realTimeInstant
       _ <- r.update { case CacheState(m0, s0, lruMap0, seqCounter0) =>
         val expiredEntries = s0.view.takeWhile((expiry, _) => hasExpired(expiry, now)).toVector
@@ -165,7 +164,7 @@ object MemCache:
 
         CacheState(m1, s1, lruMap1, seqCounter1)
       }
-      _ <- reportSize(memCacheName, r, "after", logger)
+      _ <- reportSize(memCacheName, r, "after")
     } yield ()).handleErrorWith { e =>
       // We don't go paranoid and start worrying about errors being thrown from the logger...
       logger.error(e)(

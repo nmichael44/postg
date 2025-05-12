@@ -1,22 +1,25 @@
 package app.memcachetests
 
-import app.MemCache
 import cats.effect.{IO, Resource}
-import org.scalatest.Assertion
-import org.typelevel.log4cats.Logger
-import org.typelevel.log4cats.noop.NoOpLogger
 
 import java.time.Instant
 import scala.concurrent.duration.*
 
+import org.scalatest.Assertion
+
+import app.MemCache
+import org.typelevel.log4cats.noop.NoOpLogger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
+import org.typelevel.log4cats.Logger
+
 object TestUtils:
   // An implicit noop logger.
   implicit val testLogger: Logger[IO] = NoOpLogger[IO]
+  // implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 
   extension (leftAssertion: Assertion) {
     /** Sequencing operator for Assertions mostly to avoid intellij warnings. */
-    def ~&>(rightAssertion: => Assertion): Assertion =
-      rightAssertion
+    def ~&>(rightAssertion: Assertion): Assertion = rightAssertion
   }
 
   def createCache[K: Ordering, V](
