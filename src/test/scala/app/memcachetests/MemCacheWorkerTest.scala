@@ -14,7 +14,7 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
   "MemCache: Background Cleanup Worker Logic" - {
     "W1: should remove an item that expires before the worker runs" in {
       val cleanupInterval = 100.millis
-      val itemExpiry = java.time.Duration.ofMillis(50) // Expires before first cleanup
+      val itemExpiry = 50.millis // Expires before first cleanup
       val key = "itemToClean"
       val value = 1
 
@@ -36,7 +36,7 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
 
     "W2: should not remove an item that has not expired by the time worker runs" in {
       val cleanupInterval = 100.millis
-      val itemExpiry = java.time.Duration.ofMillis(500) // Expires well after first cleanup
+      val itemExpiry = 500.millis // Expires well after first cleanup
       val key = "itemToKeep"
       val value = 2
 
@@ -73,11 +73,11 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
     "W3: should remove multiple items that expire before the worker runs" in {
       val cleanupInterval = 150.millis
       val key1 = "multiExpire1"
-      val expiry1 = java.time.Duration.ofMillis(50)
+      val expiry1 = 50.millis
       val key2 = "multiExpire2"
-      val expiry2 = java.time.Duration.ofMillis(100)
+      val expiry2 = 100.millis
       val key3 = "multiKeep" // This one should not expire quickly
-      val expiry3 = java.time.Duration.ofMillis(1000)
+      val expiry3 = 1000.millis
 
       createCache[String, Int](capacity = 5, cleanupDuration = cleanupInterval).use { cache =>
         for {
@@ -101,13 +101,13 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
     "W3b: should only remove expired items, leaving non-expired and no-expiry items" in {
       val cleanupInterval = 100.millis
       val kExp1 = "exp1"
-      val expDur1 = java.time.Duration.ofMillis(20)
+      val expDur1 = 20.millis
       val kExp2 = "exp2"
-      val expDur2 = java.time.Duration.ofMillis(50)
+      val expDur2 = 50.millis
 
       val kNoExp = "noExp"
       val kLongExp = "longExp"
-      val longExpDur = java.time.Duration.ofMillis(500)
+      val longExpDur = 500.millis
 
       createCache[String, Int](capacity = 10, cleanupDuration = cleanupInterval).use { cache =>
         for {

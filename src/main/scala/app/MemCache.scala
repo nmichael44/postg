@@ -8,8 +8,7 @@ import cats.implicits.*
 
 import java.time.Instant
 import scala.collection.immutable.{TreeMap, TreeSet}
-import scala.concurrent.duration.Duration
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 
 import app.MemCache.{hasExpired, CacheElem, CacheState}
 import org.typelevel.log4cats.Logger
@@ -47,6 +46,10 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
 
   def put(k: K, v: V): F[Unit] =
     putAux(k, v, None)
+
+  def put(k: K, v: V, duration: FiniteDuration): F[Unit] =
+    import scala.jdk.DurationConverters.ScalaDurationOps
+    put(k, v, duration.toJava)
 
   def put(k: K, v: V, duration: java.time.Duration): F[Unit] =
     putAux(k, v, duration.some)
@@ -195,11 +198,11 @@ object MemCache:
         _ <- logger.info("Putting key 'b' with no timeout.")
         _ <- cache.put("b", 2)
 
-        timeoutDuration1 = java.time.Duration.ofSeconds(2)
+        timeoutDuration1 = 2.seconds
         _ <- logger.info(s"Putting key 'c' with timeout of $timeoutDuration1.")
         _ <- cache.put("c", 3, timeoutDuration1)
 
-        timeoutDuration2 = java.time.Duration.ofSeconds(3)
+        timeoutDuration2 = 3.seconds
         _ <- logger.info(s"Putting key 'c' with timeout of $timeoutDuration2.")
         _ <- cache.put("d", 4, timeoutDuration2)
 

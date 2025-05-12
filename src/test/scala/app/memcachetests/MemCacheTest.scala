@@ -3,6 +3,8 @@ package app.memcachetests
 import cats.effect.testing.scalatest.AsyncIOSpec
 import cats.effect.IO
 
+import scala.concurrent.duration.*
+
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -39,7 +41,7 @@ class MemCacheTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
 
     "P3: Put with expiry" - {
       "should retrieve a value immediately after putting it with an expiry" in {
-        val expiryDuration = java.time.Duration.ofSeconds(60)
+        val expiryDuration = 60.seconds
 
         createCache[String, Int]().use { cache =>
           for {
@@ -50,7 +52,7 @@ class MemCacheTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
       }
 
       "should allow putting the same key first with expiry, then without" in {
-        val expiryDuration = java.time.Duration.ofSeconds(60)
+        val expiryDuration = 60.seconds
 
         createCache[String, Int](capacity = 2).use { cache =>
           for {
@@ -63,7 +65,7 @@ class MemCacheTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
       }
 
       "should allow putting the same key first without expiry, then with" in {
-        val expiryDuration = java.time.Duration.ofSeconds(60)
+        val expiryDuration = 60.seconds
 
         createCache[String, Int](capacity = 2).use { cache =>
           for {

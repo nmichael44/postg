@@ -15,14 +15,14 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
     "E1: should return None for an item whose expiry duration has passed" in {
       val key = "expiredKey"
       val value = 42
-      val expiryJDuration = java.time.Duration.ofMillis(100) // Java Duration for put
-      val sleepSDuration = 200.millis // Scala Duration for IO.sleep, longer than expiry
+      val expiryDuration = 100.millis // Java Duration for put
+      val sleepDuration = 200.millis // Scala Duration for IO.sleep, longer than expiry
 
       createCache[String, Int]().use { cache =>
         for {
-          _ <- cache.put(key, value, expiryJDuration)
+          _ <- cache.put(key, value, expiryDuration)
           getBeforeSleep <- cache.get(key) // Should be Some(value)
-          _ <- IO.sleep(sleepSDuration)
+          _ <- IO.sleep(sleepDuration)
           getAfterSleep <- cache.get(key) // Should be None
         } yield
           // Using the new operator to sequence assertions
@@ -33,13 +33,13 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
     "E2: should return Some for an item whose expiry duration has not passed" in {
       val key = "activeKey"
       val value = 43
-      val expiryJDuration = java.time.Duration.ofMillis(200)
-      val sleepSDuration = 100.millis // Shorter than expiry
+      val expiryDuration = 200.millis
+      val sleepDuration = 100.millis // Shorter than expiry
 
       createCache[String, Int]().use { cache =>
         for {
-          _ <- cache.put(key, value, expiryJDuration)
-          _ <- IO.sleep(sleepSDuration)
+          _ <- cache.put(key, value, expiryDuration)
+          _ <- IO.sleep(sleepDuration)
           getResult <- cache.get(key)
         } yield getResult shouldBe Some(value)
       }
@@ -49,8 +49,8 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
       "scenario: extend expiry" in {
         val key = "expiryUpdateKey"
         val value1 = 100
-        val initialExpiry = java.time.Duration.ofMillis(100)
-        val extendedExpiry = java.time.Duration.ofMillis(300) // New expiry from now
+        val initialExpiry = 100.millis
+        val extendedExpiry = 300.millis // New expiry from now
 
         createCache[String, Int]().use { cache =>
           for {
@@ -77,8 +77,8 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
       "scenario: shorten expiry (and it expires)" in {
         val key = "shortenExpiryKey"
         val value1 = 300
-        val initialExpiry = java.time.Duration.ofMillis(500)
-        val shortenedExpiry = java.time.Duration.ofMillis(50) // New expiry from now
+        val initialExpiry = 500.millis
+        val shortenedExpiry = 50.millis // New expiry from now
 
         createCache[String, Int]().use { cache =>
           for {
@@ -100,7 +100,7 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
       "scenario: change from timed to no expiry" in {
         val key = "removeExpiryKey"
         val value1 = 400
-        val initialExpiry = java.time.Duration.ofMillis(100)
+        val initialExpiry = 100.millis
 
         createCache[String, Int]().use { cache =>
           for {
@@ -121,7 +121,7 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
       "scenario: change from no expiry to timed (and it expires)" in {
         val key = "addExpiryKey"
         val value1 = 500
-        val newExpiry = java.time.Duration.ofMillis(100)
+        val newExpiry = 100.millis
 
         createCache[String, Int]().use { cache =>
           for {

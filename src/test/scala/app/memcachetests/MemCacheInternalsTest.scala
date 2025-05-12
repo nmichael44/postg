@@ -6,6 +6,7 @@ import cats.implicits.*
 
 import java.time.Instant
 import scala.concurrent.duration.*
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,7 +17,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
   "MemCache: Internal State Verification" - {
     "should not return expired items -- worker should remove them -- with internal state tests" in {
       val cleanupInterval = 100.millis
-      val itemExpiry = java.time.Duration.ofMillis(50) // Expires before first cleanup
+      val itemExpiry = 50.millis // Expires before first cleanup
       val key = "itemToClean"
       val value = 1
 
@@ -45,7 +46,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       val (k1, v1) = ("key1", 100)
       val (k2, v2) = ("key2", 200)
       val (k3, v3) = ("key3", 300)
-      val k2ExpiryDuration = java.time.Duration.ofSeconds(3600) // 1 hour
+      val k2ExpiryDuration = 1.hour
 
       createCache[String, Int](capacity = cacheCapacity).use { cache =>
         for {
@@ -70,7 +71,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             (mainMap.contains(k2) shouldBe true) ~&>
             (mainMap(k2).v shouldBe v2) ~&>
             (mainMap(k2).expiryOpt.isDefined shouldBe true) ~&> {
-              val k2ExpectedExpiry = nowBeforePuts.plus(k2ExpiryDuration)
+              val k2ExpectedExpiry = nowBeforePuts.plus(k2ExpiryDuration.toJava)
               (mainMap(k2).expiryOpt.get.getEpochSecond shouldBe k2ExpectedExpiry.getEpochSecond) ~&>
                 (mainMap(k2).seqCount shouldBe 1)
             } ~&> {
@@ -143,15 +144,15 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       val cleanupInterval = 100.millis // Short cleanup for test
 
       val (kExp1, vExp1) = ("expKey1", 1)
-      val exp1Duration = java.time.Duration.ofMillis(20) // Expires quickly
+      val exp1Duration = 20.millis // Expires quickly
 
       val (kExp2, vExp2) = ("expKey2", 2)
-      val exp2Duration = java.time.Duration.ofMillis(50) // Expires quickly
+      val exp2Duration = 50.millis // Expires quickly
 
       val (kNoExp, vNoExp) = ("noExpiryKey", 3)
 
       val (kLongExp, vLongExp) = ("longExpiryKey", 4)
-      val longExpDuration = java.time.Duration.ofMillis(500) // Expires after worker run
+      val longExpDuration = 500.millis // Expires after worker run
 
       createCache[String, Int](capacity = cacheCapacity, cleanupDuration = cleanupInterval).use { cache =>
         for {
@@ -207,8 +208,8 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       val (k2, v2) = ("key2", 200)
       val (k3, v3) = ("key3", 300)
       val (k4, v4) = ("key4", 400)
-      val expirySoon = java.time.Duration.ofMillis(50)
-      val expiryLater = java.time.Duration.ofSeconds(3600)
+      val expirySoon = 50.millis
+      val expiryLater = 1.hour
 
       createCache[String, Int](capacity = cacheCapacity).use { cache =>
         for {
@@ -228,8 +229,8 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
     "should maintain correct state with large capacity after worker cleanup" in {
       val cacheCapacity = 100
       val cleanupInterval = 100.millis
-      val shortExpiry = java.time.Duration.ofMillis(50)
-      val longExpiry = java.time.Duration.ofSeconds(3600)
+      val shortExpiry = 50.millis
+      val longExpiry = 1.hour
 
       val (n1, n2, n3) = (40, 30, 20) // Number of items for each category
       val (m1, m2) = (10, 5) // Number of items to 'get' for LRU update
@@ -274,8 +275,8 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
     "should maintain correct state with large capacity and parallel operations after worker cleanup" in {
       val cacheCapacity = 100
       val cleanupInterval = 100.millis
-      val shortExpiry = java.time.Duration.ofMillis(50)
-      val longExpiry = java.time.Duration.ofSeconds(3600)
+      val shortExpiry = 50.millis
+      val longExpiry = 1.hour
 
       val (n1, n2, n3) = (40, 30, 20) // Number of items for each category
       val (m1, m2) = (10, 5) // Number of items to 'get' for LRU update

@@ -45,7 +45,7 @@ object HttpWorker:
     private def getDetailsWithCache[T](
         itemName: String,
         id: Long,
-        cachingDuration: java.time.Duration,
+        cachingDuration: FiniteDuration,
         cache: MemCache[F, Long, T],
         f: NonEmptyVector[Long] => F[Map[Long, T]],
         toJobResult: Option[T] => JobResult,
@@ -70,7 +70,7 @@ object HttpWorker:
         }
       } yield toJobResult(itemOpt)
 
-    private val DirectorCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
+    private val DirectorCachingDuration: FiniteDuration = 2.minutes
 
     private def getDirectorDetails(j: JobKind.GetDirectorDetails): F[JobResult] =
       getDetailsWithCache(
@@ -89,7 +89,7 @@ object HttpWorker:
         moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
       } yield JobResult.MoviesByDirectorResult(moviesMap.getOrElse(directorId, Seq.empty))
 
-    private val ActorCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
+    private val ActorCachingDuration: FiniteDuration = 2.minutes
 
     private def getActorDetails(j: JobKind.GetActorDetails): F[JobResult] =
       getDetailsWithCache(
@@ -101,7 +101,7 @@ object HttpWorker:
         JobResult.ActorDetailsResult.apply,
       )
 
-    private val MovieCachingDuration: java.time.Duration = java.time.Duration.ofMinutes(2)
+    private val MovieCachingDuration: FiniteDuration = 2.minutes
 
     private def getMovie(j: JobKind.GetMovie): F[JobResult] =
       getDetailsWithCache(
