@@ -38,12 +38,12 @@ import pureconfig.ConfigSource
 import services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
 
 object MovieApp:
-  private final case class LiveServerState[F[_]](
+  private[app] final case class LiveServerState[F[_]](
       movieRequestCounts: Ref[F, Map[Long, Int]],
       jobQueue: Queue[F, HttpWorker.Job[F]],
   ) extends ServerState[F]
 
-  private object LiveServerState:
+  private[app] object LiveServerState:
     def create[F[_]: Async](backendServer: BackendServerConfig): F[ServerState[F]] = {
       val boundedQueueCapacity = backendServer.getBoundedQueueCapacity
       for {
@@ -53,7 +53,7 @@ object MovieApp:
       } yield LiveServerState[F](movieReqCounts, jobQueue)
     }
 
-  private enum WebServiceResult(val tag: Int):
+  private[app] enum WebServiceResult(val tag: Int):
     case OkStringRes(s: String) extends WebServiceResult(WebServiceResult.OkStringResTag)
     case OkJsonRes(json: Json) extends WebServiceResult(WebServiceResult.OkJsonResTag)
     case BadRequestRes(e: String) extends WebServiceResult(WebServiceResult.BadRequestResTag)
@@ -65,7 +65,7 @@ object MovieApp:
     inline val BadRequestResTag = 2
     inline val InternalServerErrorResTag = 3
 
-  private final class Render[F[_]: Applicative](dsl: Http4sDsl[F]):
+  private[app] final class Render[F[_]: Applicative](dsl: Http4sDsl[F]):
     import app.ImplicitConversions.castAs
     import dsl.*
     import WebServiceResult.*
@@ -297,7 +297,7 @@ object MovieApp:
   ): PartialFunction[Request[F], F[Response[F]]] =
     routesDefinition(serverState).andThen(_ >>= render.apply)
 
-  private def allRoutesComplete[F[_]: { Async, Logger }](serverState: ServerState[F], render: Render[F]): HttpApp[F] =
+  private[app] def allRoutesComplete[F[_]: { Async, Logger }](serverState: ServerState[F], render: Render[F]): HttpApp[F] =
     HttpRoutes.of[F](routes[F](serverState, render)).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: Applicative as app](
