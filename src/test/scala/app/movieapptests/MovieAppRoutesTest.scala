@@ -3,6 +3,7 @@ package app.movieapptests
 import cats.effect.*
 import cats.effect.std.Supervisor
 import cats.effect.testing.scalatest.{AssertingSyntax, AsyncIOSpec}
+import cats.syntax.all.*
 
 import scala.concurrent.duration.*
 
@@ -13,17 +14,15 @@ import app.{HttpWorker, MemCache, MovieApp, MovieDbModel}
 import app.movieapptests.ServiceStubs.{ExternalApiClientServiceStub, FileSystemServiceStub, ServerStateUpdateServiceStub}
 import app.services.MovieRepositoryService
 import app.AppConfig.BackendServerConfig
+import app.TestUtils.*
 import io.circe.literal.*
 import io.circe.Json
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.dsl.Http4sDsl
-import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
 
 final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Matchers with AssertingSyntax:
-  private implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
-
   private val testBackendConfig: BackendServerConfig =
     BackendServerConfig(numberOfWorkers = 1, boundedQueueCapacity = 4)
 
@@ -33,12 +32,11 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
   // Real MemCache instances (required by HttpWorker, but their effect isn't the focus here).
   private def createCaches[F[_]: { Temporal, Logger }]: Resource[F, CachesType[F]] =
     val workerCleanupDuration = 10.minutes
-
-    for {
-      directorCache <- MemCache.createResource[F, Long, MovieDbModel.Director]("testDirectorCache", 5, workerCleanupDuration)
-      actorCache <- MemCache.createResource[F, Long, MovieDbModel.Actor]("testActorCache", 5, workerCleanupDuration)
-      movieCache <- MemCache.createResource[F, Long, MovieDbModel.Movie]("testMovieCache", 5, workerCleanupDuration)
-    } yield (directorCache, actorCache, movieCache)
+    (
+      MemCache.createResource[F, Long, MovieDbModel.Director]("testDirectorCache", 5, workerCleanupDuration),
+      MemCache.createResource[F, Long, MovieDbModel.Actor]("testActorCache", 5, workerCleanupDuration),
+      MemCache.createResource[F, Long, MovieDbModel.Movie]("testMovieCache", 5, workerCleanupDuration),
+    ).tupled
 
   // --- Test Setup Resource ---
   // This resource now sets up and starts the actual HttpWorkers
@@ -92,20 +90,14 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
           // Act: Make the request. The real worker will process it.
           // The timeout here is a safety net for the test.
           for {
-            response <- httpApp.run(request).timeout(5.seconds) // Add a timeout for safety
-
-            // Assert
-            _ <- IO(response.status shouldBe Status.Ok)
+            response <- httpApp.run(request)
             responseJson <- response.as[Json]
-            _ <- IO(
-              responseJson shouldBe
-                json"""[
+          } yield (response.status shouldBe Status.Ok) ~&> (responseJson shouldBe
+            json"""[
                          { "movieId": 0, "title": "Xorkatikes malakies", "year": 1980 },
                          { "movieId": 1, "title": "Tsioftes", "year": 2010 }
                        ]
-                    """,
-            )
-          } yield succeed
+                    """)
         }
       }
 
@@ -118,11 +110,10 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
             Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getMoviesByDirector/$testDirectorIdWithNoMovies"))
 
           for {
-            response <- httpApp.run(request).timeout(5.seconds)
-            _ <- IO(response.status shouldBe Status.Ok)
+            response <- httpApp.run(request)
             responseJson <- response.as[Json]
-            _ <- IO(responseJson shouldBe json"[]")
-          } yield succeed
+          } yield (response.status shouldBe Status.Ok) ~&>
+            (responseJson shouldBe json"[]")
         }
       }
 
@@ -139,7 +130,7 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
             response <- httpApp.run(request).timeout(5.seconds)
             _ <- IO(response.status shouldBe Status.InternalServerError)
             bodyText <- response.bodyText.compile.string
-            _ <- IO(logger.info(s"InternalServerError body (shunning repo): '$bodyText'"))
+            _ <- IO(testLogger.info(s"InternalServerError body (shunning repo): '$bodyText'"))
           } yield succeed
         }
       }
