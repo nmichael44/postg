@@ -25,6 +25,10 @@ object HttpWorker:
       val deferred: Deferred[F, Either[Throwable, JobResult]],
   )
 
+  enum CacheStatus:
+    case CachesEnabled
+    case CachesDisabled
+
   private final class JobExecutor[F[_]: { Async as async, Logger as logger }](
       mr: MovieRepositoryService[F],
       apiClient: ExternalApiClientService[F],
@@ -33,7 +37,10 @@ object HttpWorker:
       directorMemCache: MemCache[F, Long, MovieDbModel.Director],
       actorMemCache: MemCache[F, Long, MovieDbModel.Actor],
       movieMemCache: MemCache[F, Long, MovieDbModel.Movie],
+      cacheStatus: CacheStatus,
   ):
+    private val cacheEnabled = cacheStatus == CacheStatus.CachesEnabled
+
     private def getDirectorsDetailsByName(j: JobKind.GetDirectorsDetailsByName): F[JobResult] =
       val (firstName, lastName) = (j.firstName, j.lastName)
 
@@ -52,7 +59,7 @@ object HttpWorker:
     ): F[JobResult] =
       for {
         _ <- U.logi(s"Fetching $itemName details for ID: $id")
-        cashedItemOpt <- cache.get(id)
+        cashedItemOpt <- if cacheEnabled then cache.get(id) else async.pure(None)
         itemOpt <- cashedItemOpt match {
           case Some(item) =>
             U.logi(s"$itemName details for ID: $id found in cache.").as(Some(item))
@@ -219,9 +226,19 @@ object HttpWorker:
       directorMemCache: MemCache[F, Long, MovieDbModel.Director],
       actorMemCache: MemCache[F, Long, MovieDbModel.Actor],
       movieMemCache: MemCache[F, Long, MovieDbModel.Movie],
+      cacheStatus: CacheStatus,
   ): F[Unit] =
     val jobExecutor: JobExecutor[F] =
-      JobExecutor(mr, apiClient, fileSystemService, serverStateUpdateService, directorMemCache, actorMemCache, movieMemCache)
+      JobExecutor(
+        mr,
+        apiClient,
+        fileSystemService,
+        serverStateUpdateService,
+        directorMemCache,
+        actorMemCache,
+        movieMemCache,
+        cacheStatus,
+      )
 
     val numberOfWorkers = backendServer.getNumberOfWorkers
     (0 until numberOfWorkers).toVector

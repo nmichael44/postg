@@ -11,6 +11,7 @@ import scala.concurrent.duration.*
 
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MovieMemCacheConfig}
+import app.HttpWorker.CacheStatus
 import app.JobSpecs.{JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, ReadTwoFilesInParallel}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
@@ -371,7 +372,7 @@ object MovieApp:
   def run: IO[ExitCode] =
     type F = IO
 
-    Slf4jLogger.create[F].flatMap { implicit logger =>
+    Slf4jLogger.create[F] >>= { implicit logger =>
       val configResource: Resource[F, AppConfig] =
         Resource.eval(
           IO.fromEither(
@@ -405,7 +406,7 @@ object MovieApp:
         movieMemCache <- createMovieMemCache[F](appConfig.getMemCacheConfig.getMovieMemCacheConfig)
         serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
-        supervisor <- Supervisor[F]
+        supervisor <- Supervisor[F](await = false)
         xa <- DoobieObj.xaResource(appConfig)
       } yield (appConfig, serverState, httpClient, supervisor, xa, directorMemCache, actorMemCache, movieMemCache)
 
@@ -436,6 +437,7 @@ object MovieApp:
                 directorMemCache,
                 actorMemCache,
                 movieMemCache,
+                CacheStatus.CachesEnabled,
               )
             }
             exitCode <- {

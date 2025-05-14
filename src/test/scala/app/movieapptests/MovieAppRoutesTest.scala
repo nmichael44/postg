@@ -14,6 +14,7 @@ import app.{HttpWorker, MemCache, MovieApp, MovieDbModel}
 import app.movieapptests.ServiceStubs.{ExternalApiClientServiceStub, FileSystemServiceStub, ServerStateUpdateServiceStub}
 import app.services.MovieRepositoryService
 import app.AppConfig.BackendServerConfig
+import app.HttpWorker.CacheStatus
 import app.TestUtils.*
 import io.circe.literal.*
 import io.circe.Json
@@ -29,25 +30,23 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
   private type CachesType[F[_]] =
     (MemCache[F, Long, MovieDbModel.Director], MemCache[F, Long, MovieDbModel.Actor], MemCache[F, Long, MovieDbModel.Movie])
 
-  // Real MemCache instances (required by HttpWorker, but their effect isn't the focus here).
   private def createCaches[F[_]: { Temporal, Logger }]: Resource[F, CachesType[F]] =
     val workerCleanupDuration = 10.minutes
     (
-      MemCache.createResource[F, Long, MovieDbModel.Director]("testDirectorCache", 5, workerCleanupDuration),
-      MemCache.createResource[F, Long, MovieDbModel.Actor]("testActorCache", 5, workerCleanupDuration),
-      MemCache.createResource[F, Long, MovieDbModel.Movie]("testMovieCache", 5, workerCleanupDuration),
+      MemCache.createResource[F, Long, MovieDbModel.Director]("testDirectorCache", 1, workerCleanupDuration),
+      MemCache.createResource[F, Long, MovieDbModel.Actor]("testActorCache", 1, workerCleanupDuration),
+      MemCache.createResource[F, Long, MovieDbModel.Movie]("testMovieCache", 1, workerCleanupDuration),
     ).tupled
 
   // --- Test Setup Resource ---
   // This resource now sets up and starts the actual HttpWorkers
   private def testResources(movieRepository: MovieRepositoryService[IO]): Resource[IO, HttpApp[IO]] =
     for {
-      supervisor <- Supervisor[IO]
+      supervisor <- Supervisor[IO](await = false)
       serverState <- Resource.eval(MovieApp.LiveServerState.create[IO](testBackendConfig))
       // Stubs for other services
-      apiClientStub = new ExternalApiClientServiceStub[IO]
-      fileSystemStub = new FileSystemServiceStub[IO]
-      serverUpdateStub = new ServerStateUpdateServiceStub[IO]
+      (apiClientStub, fileSystemStub, serverUpdateStub) =
+        (ExternalApiClientServiceStub[IO], FileSystemServiceStub[IO], ServerStateUpdateServiceStub[IO])
 
       (directorCache, actorCache, movieCache) <- createCaches[IO]
 
@@ -66,6 +65,7 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
           directorMemCache = directorCache,
           actorMemCache = actorCache,
           movieMemCache = movieCache,
+          CacheStatus.CachesDisabled,
         ),
       )
 
@@ -80,15 +80,14 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
       "should return OK and movies from MovieRepositoryInMemory for a valid director ID" in {
         val movieRepoInMemory = new MovieRepositoryInMemory[IO]
 
-        // DirectorId 1L is "Neo Michael" in MovieRepositoryInMemory
+        // DirectorId 1 is "Neo Michael" in MovieRepositoryInMemory
         val testDirectorIdFromMemory = 1L
 
         testResources(movieRepoInMemory).use { httpApp =>
           val request =
             Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getMoviesByDirector/$testDirectorIdFromMemory"))
 
-          // Act: Make the request. The real worker will process it.
-          // The timeout here is a safety net for the test.
+          // Make the request. The real worker will process it.
           for {
             response <- httpApp.run(request)
             responseJson <- response.as[Json]
