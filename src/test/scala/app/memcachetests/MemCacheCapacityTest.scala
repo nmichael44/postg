@@ -10,7 +10,7 @@ import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
 import app.MemCache
-import TestUtils.*
+import app.TestUtils.*
 
 final class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   private def createCacheWithCapacity[K: Ordering, V](

@@ -11,7 +11,7 @@ import scala.jdk.DurationConverters.ScalaDurationOps
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-import app.memcachetests.TestUtils.*
+import app.TestUtils.*
 
 final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   "MemCache: Internal State Verification" - {

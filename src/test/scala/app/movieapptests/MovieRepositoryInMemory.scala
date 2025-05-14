@@ -1,12 +1,12 @@
-package app
+package app.movieapptests
 
+import app.ImplicitConversions.*
+import app.MovieDbModel
+import app.services.MovieRepositoryService
 import cats.data.NonEmptyVector
 import cats.effect.Async
 
 import java.time.LocalDate
-
-import app.services.MovieRepositoryService
-import app.ImplicitConversions.*
 
 final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepositoryService[F]:
   private val Directors: Map[Long, MovieDbModel.Director] = Map(

@@ -1,6 +1,6 @@
 package app
 
-import cats.effect.{Async, Resource}
+import cats.effect.{Async, Concurrent, Resource}
 import cats.syntax.all.*
 
 import java.nio.file.Paths
@@ -93,8 +93,7 @@ object Utils:
   def readDbConfig[F[_]: Async](path: String): Resource[F, DatabaseConfig] =
     Resource
       .fromAutoCloseable(Async[F].blocking(Source.fromFile(Paths.get(path).toFile)))
-      .evalMap(source => Async[F].blocking(source.mkString))
-      .evalMap(parseDatabaseConfig[F])
+      .evalMap(source => Async[F].blocking(source.mkString) >>= parseDatabaseConfig[F])
 
   def logi[F[_]: Logger as logger](s: String): F[Unit] =
     logger.info(s)

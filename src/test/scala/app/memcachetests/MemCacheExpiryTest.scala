@@ -8,7 +8,7 @@ import scala.concurrent.duration.*
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-import app.memcachetests.TestUtils.*
+import app.TestUtils.*
 
 final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
   "MemCache: Basic Expiry Logic (via get)" - {

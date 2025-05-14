@@ -1,4 +1,4 @@
-package app.memcachetests
+package app
 
 import cats.effect.{IO, Resource}
 
@@ -7,7 +7,6 @@ import scala.concurrent.duration.*
 
 import org.scalatest.Assertion
 
-import app.MemCache
 import org.typelevel.log4cats.noop.NoOpLogger
 //import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
