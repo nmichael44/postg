@@ -1,14 +1,15 @@
 package app.movieapptests
 
-import app.ImplicitConversions.*
-import app.MovieDbModel
-import app.services.MovieRepositoryService
 import cats.data.NonEmptyVector
 import cats.effect.Async
 
 import java.time.LocalDate
 
-final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepositoryService[F]:
+import app.services.MovieRepositoryService
+import app.ImplicitConversions.*
+import app.MovieDbModel
+
+final class MovieRepositoryInMemory[F[_]: Async as async] extends MovieRepositoryService[F]:
   private val Directors: Map[Long, MovieDbModel.Director] = Map(
     0L -> MovieDbModel.Director(0L, "Steven", "Spielberg", LocalDate.of(1965, 5, 1)),
     1L -> MovieDbModel.Director(1L, "Neo", "Michael", LocalDate.of(1970, 4, 19)),
@@ -33,38 +34,44 @@ final class MovieRepositoryInMemory[F[_]: Async] extends MovieRepositoryService[
       firstName: Option[String],
       lastName: Option[String],
   ): F[Seq[MovieDbModel.Director]] =
-    Async[F].delay:
+    async.delay {
       Directors.values.filter { director =>
         firstName.forall(_ == director.firstName) && lastName.forall(_ == director.lastName)
       }.toVector
+    }
 
   override def getDirectorDetails(
       directorIds: NonEmptyVector[Long],
   ): F[Map[Long, MovieDbModel.Director]] =
-    Async[F].delay:
+    async.delay {
+      println(s"Asked to deliver directorIds: $directorIds")
       directorIds.view.flatMap(id => Directors.get(id).map(e => (id, e))).toMap
+    }
 
   override def getActorDetails(actorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Actor]] =
-    Async[F].delay:
+    async.delay {
       actorIds.view.flatMap(id => Actors.get(id).map(e => (id, e))).toMap
+    }
 
   override def getMoviesByDirectorId(
       directorIds: NonEmptyVector[Long],
   ): F[Map[Long, Seq[MovieDbModel.Movie]]] =
-    Async[F].delay:
+    async.delay {
       directorIds.view
         .flatMap { directorId =>
           MovieToDirector.iterator.filter(p => p._2 == directorId)
         }
         .toVector
         .groupMap(_._2)(p => Movies(p._1))
+    }
 
   override def getMovieDetails(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]] =
     val e = Map.empty[Long, MovieDbModel.Movie]
-    Async[F].delay:
+    async.delay {
       movieIds.toVector.foldLeft(e) { (m, movieId) =>
         Movies.get(movieId).fold(m)(m.updated(movieId, _))
       }
+    }
 
   override def createMovie(title: String, year: Int): F[Long] =
     ??? // For now

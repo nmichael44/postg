@@ -13,14 +13,14 @@ import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import app.MemCache.{hasExpired, CacheElem, CacheState}
 import org.typelevel.log4cats.Logger
 
-final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] private (
+final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V] private (
     memCacheName: String,
     capacity: Int,
     r: Ref[F, CacheState[K, V]],
     cleanupFiber: Fiber[F, Throwable, Nothing],
 ):
   def get(k: K): F[Option[V]] =
-    (Temporal[F].realTimeInstant) >>= { now =>
+    temporal.realTimeInstant >>= { now =>
       r.modify { case cacheState0 @ CacheState(m0, s0, lruMap0, seqCounter0) =>
         m0.get(k) match {
           case Some(CacheElem(v, expiryOpt, seqCount)) =>
@@ -67,7 +67,7 @@ final class MemCache[F[_]: { Temporal, Logger as logger }, K: Ordering, V] priva
     else (m0, s0, lru0)
 
   private def putAux(k: K, v: V, durationOpt: Option[java.time.Duration]): F[Unit] =
-    Temporal[F].realTimeInstant >>= { now =>
+    temporal.realTimeInstant >>= { now =>
       r.update { case CacheState(m, s, lruMap, seqCounter0) =>
         val existingEntryOpt: Option[CacheElem[V]] = m.get(k)
 

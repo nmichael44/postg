@@ -69,7 +69,9 @@ object HttpWorker:
               itemDetailsMap.get(id) match {
                 case Some(item) =>
                   U.logi(s"$itemName details for ID: $id found in DB. Putting in cache.") *>
-                    cache.put(id, item, cachingDuration).as(Some(item))
+                    (if cacheEnabled
+                     then cache.put(id, item, cachingDuration)
+                     else async.pure(())).as(Some(item))
                 case None =>
                   U.logi(s"$itemName details for ID: $id not found in DB.").as(None)
               }

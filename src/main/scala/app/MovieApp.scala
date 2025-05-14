@@ -57,14 +57,16 @@ object MovieApp:
   private[app] enum WebServiceResult(val tag: Int):
     case OkStringRes(s: String) extends WebServiceResult(WebServiceResult.OkStringResTag)
     case OkJsonRes(json: Json) extends WebServiceResult(WebServiceResult.OkJsonResTag)
+    case NotFoundRes(s: String) extends WebServiceResult(WebServiceResult.NotFoundResTag)
     case BadRequestRes(e: String) extends WebServiceResult(WebServiceResult.BadRequestResTag)
     case InternalServerErrorRes extends WebServiceResult(WebServiceResult.InternalServerErrorResTag)
 
   private object WebServiceResult:
     inline val OkStringResTag = 0
     inline val OkJsonResTag = 1
-    inline val BadRequestResTag = 2
-    inline val InternalServerErrorResTag = 3
+    inline val NotFoundResTag = 2
+    inline val BadRequestResTag = 3
+    inline val InternalServerErrorResTag = 4
 
   private[app] final class Render[F[_]: Applicative](dsl: Http4sDsl[F]):
     import app.ImplicitConversions.castAs
@@ -74,6 +76,7 @@ object MovieApp:
     def apply(wsr: WebServiceResult): F[Response[F]] = (wsr.tag: @switch) match {
       case OkStringResTag => Ok(wsr.castAs[OkStringRes].s)
       case OkJsonResTag => Ok(wsr.castAs[OkJsonRes].json)
+      case NotFoundResTag => NotFound(wsr.castAs[NotFoundRes].s)
       case BadRequestResTag => BadRequest(wsr.castAs[BadRequestRes].e)
       case InternalServerErrorResTag => InternalServerError()
     }
@@ -130,9 +133,7 @@ object MovieApp:
       "Fetching directors details.",
       serverState,
       GetDirectorDetails(directorId),
-      _.director.fold(WebServiceResult.BadRequestRes(s"Director id: '$directorId' not found!"))(dir =>
-        WebServiceResult.OkJsonRes(dir.asJson),
-      ),
+      _.director.fold(WebServiceResult.NotFoundRes("Director not found"))(dir => WebServiceResult.OkJsonRes(dir.asJson)),
     )
 
   private def getActorDetails[F[_]: { Async, Logger as logger }](
@@ -143,9 +144,7 @@ object MovieApp:
       "Fetching actor details.",
       serverState,
       GetActorDetails(actorId),
-      _.actor.fold(WebServiceResult.BadRequestRes(s"Actor id: '$actorId' not found!"))(act =>
-        WebServiceResult.OkJsonRes(act.asJson),
-      ),
+      _.actor.fold(WebServiceResult.NotFoundRes("Actor not found"))(act => WebServiceResult.OkJsonRes(act.asJson)),
     )
 
   private val firstNameParam: String = "firstName"
@@ -187,9 +186,7 @@ object MovieApp:
       "Fetching movie by Id.",
       serverState,
       GetMovie(movieId),
-      _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!")) { mv =>
-        WebServiceResult.OkJsonRes(mv.asJson)
-      },
+      _.movie.fold(WebServiceResult.NotFoundRes("Movie not found"))(mv => WebServiceResult.OkJsonRes(mv.asJson)),
     )
 
   private def getMovieWithCounting[F[_]: { Async, Logger as logger }](
@@ -372,6 +369,21 @@ object MovieApp:
   def run: IO[ExitCode] =
     type F = IO
 
+    type CoreResources[F[_]] =
+      Resource[
+        F,
+        (
+            AppConfig,
+            ServerState[F],
+            http4s.client.Client[F],
+            Supervisor[F],
+            Transactor[F],
+            MemCache[F, Long, MovieDbModel.Director],
+            MemCache[F, Long, MovieDbModel.Actor],
+            MemCache[F, Long, MovieDbModel.Movie],
+        ),
+      ]
+
     Slf4jLogger.create[F] >>= { implicit logger =>
       val configResource: Resource[F, AppConfig] =
         Resource.eval(
@@ -383,21 +395,6 @@ object MovieApp:
               .map(pureconfig.error.ConfigReaderException[AppConfig]),
           ),
         )
-
-      type CoreResources[F[_]] =
-        Resource[
-          F,
-          (
-              AppConfig,
-              ServerState[F],
-              http4s.client.Client[F],
-              Supervisor[F],
-              Transactor[F],
-              MemCache[F, Long, MovieDbModel.Director],
-              MemCache[F, Long, MovieDbModel.Actor],
-              MemCache[F, Long, MovieDbModel.Movie],
-          ),
-        ]
 
       val coreResources: CoreResources[F] = for {
         appConfig <- configResource
@@ -417,29 +414,26 @@ object MovieApp:
           val movieRepositoryService: MovieRepositoryService[F] =
             MovieRepositoryServiceLive.create(xa)
           val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create
+          val serverStateUpdateService: ServerStateUpdateService[F] =
+            ServerStateUpdateServiceLive.create(serverState)
 
           val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
           val render: Render[F] = Render(Http4sDsl[F])
 
           for {
-            _ <- {
-              val serverStateUpdateService: ServerStateUpdateService[F] =
-                ServerStateUpdateServiceLive.create(serverState)
-
-              HttpWorker.startWorkers(
-                appConfig.getBackendServerConfig,
-                movieRepositoryService,
-                externalApiClientService,
-                fileSystemService,
-                serverStateUpdateService,
-                serverState.jobQueue,
-                supervisor,
-                directorMemCache,
-                actorMemCache,
-                movieMemCache,
-                CacheStatus.CachesEnabled,
-              )
-            }
+            _ <- HttpWorker.startWorkers(
+              appConfig.getBackendServerConfig,
+              movieRepositoryService,
+              externalApiClientService,
+              fileSystemService,
+              serverStateUpdateService,
+              serverState.jobQueue,
+              supervisor,
+              directorMemCache,
+              actorMemCache,
+              movieMemCache,
+              CacheStatus.CachesEnabled,
+            )
             exitCode <- {
               val httpApp: HttpApp[F] = allRoutesComplete[F](serverState, render)
               createServerResource(serverHostIP, serverHostPort, httpApp)
