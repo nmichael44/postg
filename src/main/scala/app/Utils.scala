@@ -9,11 +9,11 @@ import scala.io.Source
 import org.typelevel.log4cats.Logger
 
 object Utils:
-  private def parseLine[F[_]: Async](line: String): F[(String, String)] =
+  private def parseLine[F[_]: Async as async](line: String): F[(String, String)] =
     line.split("=", 2).toList match {
-      case key :: value :: Nil => Async[F].pure(key.toLowerCase, value)
+      case key :: value :: Nil => async.pure(key.toLowerCase, value)
       case _ =>
-        Async[F].raiseError(
+        async.raiseError(
           IllegalArgumentException(
             s"Invalid config line: '$line'. Expected 'key=value' format.",
           ),
@@ -90,10 +90,10 @@ object Utils:
       serverHostPort <- parseServerHostPort(configMap)
     } yield DatabaseConfig(host, port, user, password, serverHostIP, serverHostPort)
 
-  def readDbConfig[F[_]: Async](path: String): Resource[F, DatabaseConfig] =
+  def readDbConfig[F[_]: Async as async](path: String): Resource[F, DatabaseConfig] =
     Resource
-      .fromAutoCloseable(Async[F].blocking(Source.fromFile(Paths.get(path).toFile)))
-      .evalMap(source => Async[F].blocking(source.mkString) >>= parseDatabaseConfig[F])
+      .fromAutoCloseable(async.blocking(Source.fromFile(Paths.get(path).toFile)))
+      .evalMap(source => async.blocking(source.mkString) >>= parseDatabaseConfig[F])
 
   def logi[F[_]: Logger as logger](s: String): F[Unit] =
     logger.info(s)

@@ -31,4 +31,4 @@ object ServiceStubs:
     override def getAllCounts: F[Map[Long, Int]] = ???
 
     override def incrementAndGet(movieId: Long): F[Int] =
-      async.pure(1) // Return a dummy count
+      async.pure(1) // Return a fake count
