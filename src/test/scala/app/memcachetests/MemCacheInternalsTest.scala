@@ -13,7 +13,7 @@ import org.scalatest.matchers.should.Matchers
 
 import app.TestUtils.*
 
-final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
+final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Matchers:
   "MemCache: Internal State Verification" - {
     "should not return expired items -- worker should remove them -- with internal state tests" in {
       val cleanupInterval = 100.millis
@@ -23,17 +23,20 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
 
       createCache[String, Int](cleanupDuration = cleanupInterval).use { cache =>
         for {
-          _ <- cache.put(key, value, itemExpiry)
           // Item in the cache will expire at T+50ms. The worker will first run around T+100ms.
+          _ <- cache.put(key, value, itemExpiry)
 
-          getBeforeWorker <- cache.get(key) // Should be Some(1), expiry check in get is not enough for this test
+          // Should be Some(1), expiry check in get is not enough for this test
+          getBeforeWorker <- cache.get(key)
 
           // Sleep a bit longer than the expiry period. Add a small buffer to account for scheduling.
           _ <- IO.sleep(60.millis)
-          getAfterExpiry <- cache.get(key) // Should be None -- get will not return an expired value.
+          // Should be None -- get will not return an expired value.
+          getAfterExpiry <- cache.get(key)
           (m0, s0, lru0, _) <- cache.getInternalCacheState
           _ <- IO.sleep(60.millis)
-          getAfterWorker <- cache.get(key) // Should be None -- removed completely from the cache by the worker.
+          // Should be None -- removed completely from the cache by the worker.
+          getAfterWorker <- cache.get(key)
           (m1, s1, lru1, _) <- cache.getInternalCacheState
         } yield (getBeforeWorker shouldBe Some(value)) ~&> (getAfterExpiry shouldBe None) ~&> (getAfterWorker shouldBe None) ~&>
           (m0.size shouldBe 1) ~&> (s0.size shouldBe 1) ~&> (lru0.size shouldBe 1) ~&>
@@ -263,8 +266,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             (longExpiryPairs.forall(p => mainMap.contains(p._1)) shouldBe true) ~&>
             (noExpiryPairs.forall(p => mainMap.contains(p._1)) shouldBe true) ~&>
             // Maps should be consistent
-            (mainMap.size shouldBe (n2 + n3)) ~&> // Expected remaining items
-            (lruMap.size shouldBe (n2 + n3)) ~&>
+            (mainMap.size shouldBe (n2 + n3)) ~&> (lruMap.size shouldBe (n2 + n3)) ~&>
             (mainMap.keySet shouldBe lruMap.values.toSet) ~&>
             // Expiry set should only contain long expiry items
             (expirySet.size shouldBe longExpiryPairs.length) ~&>
@@ -309,8 +311,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
             (longExpiryPairs.forall(p => mainMap.contains(p._1)) shouldBe true) ~&>
             (noExpiryPairs.forall(p => mainMap.contains(p._1)) shouldBe true) ~&>
             // Check sizes explicitly
-            (mainMap.size shouldBe (n2 + n3)) ~&> // Expected remaining items
-            (lruMap.size shouldBe (n2 + n3)) ~&>
+            (mainMap.size shouldBe (n2 + n3)) ~&> (lruMap.size shouldBe (n2 + n3)) ~&>
             // Maps should be consistent
             (mainMap.keySet shouldBe lruMap.values.toSet) ~&>
             // Expiry set should only contain long expiry items
@@ -320,4 +321,3 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       }
     }
   }
-}

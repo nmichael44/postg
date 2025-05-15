@@ -12,7 +12,6 @@ import org.scalatest.matchers.should.Matchers
 
 import app.{HttpWorker, MemCache, MovieApp, MovieDbModel}
 import app.movieapptests.ServiceStubs.{ExternalApiClientServiceStub, FileSystemServiceStub, ServerStateUpdateServiceStub}
-import app.services.MovieRepositoryService
 import app.AppConfig.BackendServerConfig
 import app.HttpWorker.CacheStatus
 import app.TestUtils.*
@@ -40,7 +39,7 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
 
   // --- Test Setup Resource ---
   // This resource now sets up and starts the actual HttpWorkers
-  private def testResources(movieRepository: MovieRepositoryService[IO]): Resource[IO, HttpApp[IO]] =
+  private def testResources(withDb: Boolean): Resource[IO, HttpApp[IO]] =
     for {
       supervisor <- Supervisor[IO](await = false)
       serverState <- Resource.eval(MovieApp.LiveServerState.create[IO](testBackendConfig))
@@ -53,6 +52,10 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
       // Start the actual HttpWorkers.
       // HttpWorker.startWorkers itself is F[Unit]; it launches background fibers via the supervisor.
       // These workers will consume jobs from serverState.jobQueue.
+      movieRepository <- Resource.eval(
+        if withDb then MovieRepositoryInMemory.createWithDefaultDb[IO]
+        else IO.pure(MovieAppTestUtils.MovieRepositoryServiceShunning[IO]),
+      )
       _ <- Resource.eval(
         HttpWorker.startWorkers[IO](
           backendServer = testBackendConfig,
@@ -78,12 +81,10 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
   "MovieApp Routes with real HttpWorker" - {
     "GET /getMoviesByDirector/{directorId}" - {
       "should return OK and movies from MovieRepositoryInMemory for a valid director ID" in {
-        val movieRepoInMemory = new MovieRepositoryInMemory[IO]
-
         // DirectorId 1 is "Neo Michael" in MovieRepositoryInMemory
         val testDirectorIdFromMemory = 1L
 
-        testResources(movieRepoInMemory).use { httpApp =>
+        testResources(true).use { httpApp =>
           val request =
             Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getMoviesByDirector/$testDirectorIdFromMemory"))
 
@@ -99,12 +100,10 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
                    """)
         }
       }
-
       "should return OK and empty list if director has no movies in MovieRepositoryInMemory" in {
-        val movieRepoInMemory = new MovieRepositoryInMemory[IO]
         val testDirectorIdWithNoMovies = 2L
 
-        testResources(movieRepoInMemory).use { httpApp =>
+        testResources(true).use { httpApp =>
           val request =
             Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getMoviesByDirector/$testDirectorIdWithNoMovies"))
 
@@ -116,11 +115,8 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
         }
       }
 
-      "should return InternalServerError if the repository service (shunning) fails" in {
-        // Use the Shunning repository which makes getMoviesByDirectorId fail
-        val shunningMovieRepo = MovieAppTestUtils.MovieRepositoryServiceShunning[IO]
-
-        testResources(shunningMovieRepo).use { httpApp =>
+      "should return InternalServerError if the repository service (shunning) fails" in
+        testResources(false).use { httpApp =>
           // Any director ID will do, as the repo call will fail
           val anyDirectorId = 0L
           val request = Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getMoviesByDirector/$anyDirectorId"))
@@ -132,90 +128,85 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
             _ <- IO(testLogger.info(s"InternalServerError body (shunning repo): '$bodyText'"))
           } yield succeed
         }
-      }
     }
-  }
 
-  "Tests for GetDirectorDetails" - {
-    "should return OK and director details for a valid director id" in {
-      val movieRepoInMemory = new MovieRepositoryInMemory[IO]
-      val directorId = 1L
+    "Tests for GetDirectorDetails" - {
+      "should return OK and director details for a valid director id" in {
+        val directorId = 1L
 
-      val expectedJson =
-        json"""{
+        val expectedJson =
+          json"""{
                  "directorId": $directorId,
                  "firstName": "Neo",
                  "lastName": "Michael",
                  "dob": "1970-04-19"
                }"""
 
-      testResources(movieRepoInMemory).use { httpApp =>
-        val request =
-          Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getDirector/$directorId"))
+        testResources(true).use { httpApp =>
+          val request =
+            Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getDirector/$directorId"))
 
-        for {
-          response <- httpApp.run(request)
-          responseJson <- response.as[Json]
-        } yield (response.status shouldBe Status.Ok) ~&>
-          (responseJson shouldBe expectedJson)
+          for {
+            response <- httpApp.run(request)
+            responseJson <- response.as[Json]
+          } yield (response.status shouldBe Status.Ok) ~&>
+            (responseJson shouldBe expectedJson)
+        }
+      }
+
+      "should return NotFound for a non-existent director id" in {
+        val nonExistentDirectorId = 11L
+
+        testResources(true).use { httpApp =>
+          val request =
+            Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getDirector/$nonExistentDirectorId"))
+
+          for {
+            response <- httpApp.run(request)
+            bodyText <- response.bodyText.compile.string
+          } yield (response.status shouldBe Status.NotFound) ~&>
+            (bodyText should equal("Director not found"))
+        }
       }
     }
 
-    "should return NotFound for a non-existent director id" in {
-      val movieRepoInMemory = new MovieRepositoryInMemory[IO]
-      val nonExistentDirectorId = 11L
+    "Tests for GetActorDetails" - {
+      "should return OK and actor details for a valid actor id" in {
+        val actorId = 0L
 
-      testResources(movieRepoInMemory).use { httpApp =>
-        val request =
-          Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getDirector/$nonExistentDirectorId"))
-
-        for {
-          response <- httpApp.run(request)
-          bodyText <- response.bodyText.compile.string
-        } yield (response.status shouldBe Status.NotFound) ~&>
-          (bodyText should equal("Director not found"))
-      }
-    }
-  }
-
-  "Tests for GetActorDetails" - {
-    "should return OK and actor details for a valid actor id" in {
-      val movieRepoInMemory = new MovieRepositoryInMemory[IO]
-      val actorId = 0L
-
-      val expectedJson =
-        json"""{
+        val expectedJson =
+          json"""{
                  "actorId": $actorId,
                  "firstName": "Neo",
                  "lastName": "Michael",
                  "dob": "1970-04-19"
                }"""
 
-      testResources(movieRepoInMemory).use { httpApp =>
-        val request =
-          Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getActor/$actorId"))
+        testResources(true).use { httpApp =>
+          val request =
+            Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getActor/$actorId"))
 
-        for {
-          response <- httpApp.run(request)
-          responseJson <- response.as[Json]
-        } yield (response.status shouldBe Status.Ok) ~&>
-          (responseJson shouldBe expectedJson)
+          for {
+            response <- httpApp.run(request)
+            responseJson <- response.as[Json]
+          } yield (response.status shouldBe Status.Ok) ~&>
+            (responseJson shouldBe expectedJson)
+        }
       }
-    }
 
-    "should return NotFound for a non-existent actor id" in {
-      val movieRepoInMemory = new MovieRepositoryInMemory[IO]
-      val nonExistentActorId = 11L
+      "should return NotFound for a non-existent actor id" in {
+        val nonExistentActorId = 11L
 
-      testResources(movieRepoInMemory).use { httpApp =>
-        val request =
-          Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getActor/$nonExistentActorId"))
+        testResources(true).use { httpApp =>
+          val request =
+            Request[IO](method = Method.GET, uri = Uri.unsafeFromString(s"/getActor/$nonExistentActorId"))
 
-        for {
-          response <- httpApp.run(request)
-          bodyText <- response.bodyText.compile.string
-        } yield (response.status shouldBe Status.NotFound) ~&>
-          (bodyText should equal("Actor not found"))
+          for {
+            response <- httpApp.run(request)
+            bodyText <- response.bodyText.compile.string
+          } yield (response.status shouldBe Status.NotFound) ~&>
+            (bodyText should equal("Actor not found"))
+        }
       }
     }
   }

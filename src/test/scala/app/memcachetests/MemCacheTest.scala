@@ -10,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 import app.TestUtils.*
 
-class MemCacheTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
+final class MemCacheTest extends AsyncFreeSpec with AsyncIOSpec with Matchers:
   "MemCache: Core get and put operations" - {
     "P1: Basic put and get" - {
       "should retrieve a value after putting it (no expiry)" in
@@ -78,4 +78,3 @@ class MemCacheTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
       }
     }
   }
-}

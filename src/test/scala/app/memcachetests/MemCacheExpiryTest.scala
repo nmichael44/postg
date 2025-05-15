@@ -10,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 import app.TestUtils.*
 
-final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
+final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Matchers:
   "MemCache: Basic Expiry Logic (via get)" - {
     "E1: should return None for an item whose expiry duration has passed" in {
       val key = "expiredKey"
@@ -140,4 +140,3 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
       }
     }
   }
-}

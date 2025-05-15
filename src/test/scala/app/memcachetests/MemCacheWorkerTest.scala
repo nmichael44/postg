@@ -10,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 import app.TestUtils.*
 
-final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
+final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Matchers:
   "MemCache: Background Cleanup Worker Logic" - {
     "W1: should remove an item that expires before the worker runs" in {
       val cleanupInterval = 100.millis
@@ -131,4 +131,3 @@ final class MemCacheWorkerTest extends AsyncFreeSpec with AsyncIOSpec with Match
       }
     }
   }
-}

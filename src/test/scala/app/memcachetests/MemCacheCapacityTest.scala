@@ -12,7 +12,7 @@ import org.scalatest.matchers.should.Matchers
 import app.MemCache
 import app.TestUtils.*
 
-final class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Matchers {
+final class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Matchers:
   private def createCacheWithCapacity[K: Ordering, V](
       capacity: Int,
       name: String = "capacity-test-cache",
@@ -158,4 +158,3 @@ final class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Mat
           (getK2 shouldBe Some(2))
       }
   }
-}
