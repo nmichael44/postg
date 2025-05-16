@@ -231,15 +231,9 @@ object HttpWorker:
       cacheStatus: CacheStatus,
   ): F[Unit] =
     val jobExecutor: JobExecutor[F] =
-      JobExecutor(
-        mr,
-        apiClient,
-        fileSystemService,
-        serverStateUpdateService,
-        appMemCaches,
-        cacheStatus,
-      )
+      JobExecutor(mr, apiClient, fileSystemService, serverStateUpdateService, appMemCaches, cacheStatus)
 
     val numberOfWorkers = backendServer.getNumberOfWorkers
-    (0 until numberOfWorkers).toVector
+    Vector
+      .from(0 until numberOfWorkers)
       .traverseVoid(workerId => supervisor.supervise(worker(workerId, queue, jobExecutor)))
