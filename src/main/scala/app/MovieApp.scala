@@ -411,19 +411,13 @@ object MovieApp:
       ),
     ]
 
-  private def runHttpApp[F[_]: { Async, Network, Logger }](
-      serverState: ServerState[F],
-      serverHostIP: Ipv4Address,
-      serverHostPort: Port,
-  ): F[ExitCode] =
+  private def runHttpApp[F[_]: { Async, Network, Logger }](serverState: ServerState[F], appConfig: AppConfig): F[ExitCode] =
     val render: Render[F] = Render(Http4sDsl[F])
+    val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
     val httpApp: HttpApp[F] = allRoutesComplete[F](serverState, render)
+
     createServerResource(serverHostIP, serverHostPort, httpApp)
-      .use(server =>
-        U.logi(
-          s"Server started with base uri: '${server.baseUri.toString}'.",
-        ) *> Async[F].never,
-      )
+      .use(server => U.logi(s"Server started with base uri: '${server.baseUri.toString}'.") *> Async[F].never)
       .as(ExitCode.Success)
 
   def run: IO[ExitCode] =
@@ -448,21 +442,16 @@ object MovieApp:
         val serverStateUpdateService: ServerStateUpdateService[F] =
           ServerStateUpdateServiceLive.create(serverState)
 
-        val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
-
-        for {
-          _ <- HttpWorker.startWorkers(
-            appConfig.getBackendServerConfig,
-            movieRepositoryService,
-            externalApiClientService,
-            fileSystemService,
-            serverStateUpdateService,
-            serverState.jobQueue,
-            supervisor,
-            appMemCaches,
-            CacheStatus.CachesEnabled,
-          )
-          exitCode <- runHttpApp(serverState, serverHostIP, serverHostPort)
-        } yield exitCode
+        HttpWorker.startWorkers(
+          appConfig.getBackendServerConfig,
+          movieRepositoryService,
+          externalApiClientService,
+          fileSystemService,
+          serverStateUpdateService,
+          serverState.jobQueue,
+          supervisor,
+          appMemCaches,
+          CacheStatus.CachesEnabled,
+        ) *> runHttpApp(serverState, appConfig)
       }
     }
