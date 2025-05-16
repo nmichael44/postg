@@ -12,6 +12,7 @@ import app.services.{ExternalApiClientService, FileSystemService, MovieRepositor
 import app.AppConfig.BackendServerConfig
 import app.ImplicitConversions.*
 import app.JobSpecs.{JobKind, JobResult}
+import app.MovieApp.AppMemCaches
 import app.Utils as U
 import io.circe.*
 import io.circe.generic.auto.*
@@ -34,12 +35,13 @@ object HttpWorker:
       apiClient: ExternalApiClientService[F],
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
-      directorMemCache: MemCache[F, Long, MovieDbModel.Director],
-      actorMemCache: MemCache[F, Long, MovieDbModel.Actor],
-      movieMemCache: MemCache[F, Long, MovieDbModel.Movie],
+      appMemCaches: AppMemCaches[F],
       cacheStatus: CacheStatus,
   ):
     private val cacheEnabled = cacheStatus == CacheStatus.CachesEnabled
+    private val directorMemCache: MemCache[F, Long, MovieDbModel.Director] = appMemCaches.directorCache
+    private val actorMemCache: MemCache[F, Long, MovieDbModel.Actor] = appMemCaches.actorCache
+    private val movieMemCache: MemCache[F, Long, MovieDbModel.Movie] = appMemCaches.movieCache
 
     private def getDirectorsDetailsByName(j: JobKind.GetDirectorsDetailsByName): F[JobResult] =
       val (firstName, lastName) = (j.firstName, j.lastName)
@@ -225,9 +227,7 @@ object HttpWorker:
       serverStateUpdateService: ServerStateUpdateService[F],
       queue: Queue[F, HttpWorker.Job[F]],
       supervisor: Supervisor[F],
-      directorMemCache: MemCache[F, Long, MovieDbModel.Director],
-      actorMemCache: MemCache[F, Long, MovieDbModel.Actor],
-      movieMemCache: MemCache[F, Long, MovieDbModel.Movie],
+      appMemCaches: AppMemCaches[F],
       cacheStatus: CacheStatus,
   ): F[Unit] =
     val jobExecutor: JobExecutor[F] =
@@ -236,9 +236,7 @@ object HttpWorker:
         apiClient,
         fileSystemService,
         serverStateUpdateService,
-        directorMemCache,
-        actorMemCache,
-        movieMemCache,
+        appMemCaches,
         cacheStatus,
       )
 

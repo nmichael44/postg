@@ -10,11 +10,12 @@ import scala.annotation.switch
 import scala.concurrent.duration.*
 
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
-import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MovieMemCacheConfig}
+import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
 import app.HttpWorker.CacheStatus
 import app.JobSpecs.{JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, ReadTwoFilesInParallel}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
+import app.MovieApp.AppMemCaches
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
@@ -322,10 +323,17 @@ object MovieApp:
       case (_, None) => throw AssertionError(s"Illegal ServerHostPort: '$port'.")
     }
 
+  private def createCache[F[_]: { Temporal, Logger }, T](
+      cacheName: String,
+      capacity: Int,
+      cleanupDuration: FiniteDuration,
+  ): Resource[F, MemCache[F, Long, T]] =
+    MemCache.createResource[F, Long, T](cacheName, capacity, cleanupDuration)
+
   private def createDirectorMemCache[F[_]: { Temporal, Logger }](
       directorMemCacheConfig: DirectorMemCacheConfig,
   ): Resource[F, MemCache[F, Long, MovieDbModel.Director]] =
-    MemCache.createResource[F, Long, MovieDbModel.Director](
+    createCache[F, MovieDbModel.Director](
       "Director MemCache",
       directorMemCacheConfig.getCapacity,
       directorMemCacheConfig.getCleanupDurationInMillis.milliseconds,
@@ -334,7 +342,7 @@ object MovieApp:
   private def createActorMemCache[F[_]: { Temporal, Logger }](
       actorMemCacheConfig: ActorMemCacheConfig,
   ): Resource[F, MemCache[F, Long, MovieDbModel.Actor]] =
-    MemCache.createResource[F, Long, MovieDbModel.Actor](
+    createCache[F, MovieDbModel.Actor](
       "Actor MemCache",
       actorMemCacheConfig.getCapacity,
       actorMemCacheConfig.getCleanupDurationInMillis.milliseconds,
@@ -343,10 +351,34 @@ object MovieApp:
   private def createMovieMemCache[F[_]: { Temporal, Logger }](
       movieMemCacheConfig: MovieMemCacheConfig,
   ): Resource[F, MemCache[F, Long, MovieDbModel.Movie]] =
-    MemCache.createResource[F, Long, MovieDbModel.Movie](
+    createCache[F, MovieDbModel.Movie](
       "Movie MemCache",
       movieMemCacheConfig.getCapacity,
       movieMemCacheConfig.getCleanupDurationInMillis.milliseconds,
+    )
+
+  final class AppMemCaches[F[_]](
+      val directorCache: MemCache[F, Long, MovieDbModel.Director],
+      val actorCache: MemCache[F, Long, MovieDbModel.Actor],
+      val movieCache: MemCache[F, Long, MovieDbModel.Movie],
+  )
+
+  private def createMemCaches[F[_]: { Temporal, Logger }](memCacheConfig: MemCacheConfig): Resource[F, AppMemCaches[F]] =
+    (
+      createDirectorMemCache(memCacheConfig.getDirectorMemCacheConfig),
+      createActorMemCache(memCacheConfig.getActorMemCacheConfig),
+      createMovieMemCache(memCacheConfig.getMovieMemCacheConfig),
+    ).mapN((d, a, m) => AppMemCaches[F](d, a, m))
+
+  private def createConfigResource[F[_]: { Async as async, Logger }]() =
+    Resource.eval[F, AppConfig](
+      async.fromEither(
+        ConfigSource.default
+          .at("app-config")
+          .load[AppConfig]
+          .left
+          .map(pureconfig.error.ConfigReaderException[AppConfig]),
+      ),
     )
 
   // This is the number of redirects Ember will perform when a response
@@ -366,84 +398,71 @@ object MovieApp:
       .withHttpApp(httpApp)
       .build
 
+  private type CoreResources[F[_]] =
+    Resource[
+      F,
+      (
+          AppConfig,
+          ServerState[F],
+          http4s.client.Client[F],
+          Supervisor[F],
+          Transactor[F],
+          AppMemCaches[F],
+      ),
+    ]
+
+  private def runHttpApp[F[_]: { Async, Network, Logger }](
+      serverState: ServerState[F],
+      serverHostIP: Ipv4Address,
+      serverHostPort: Port,
+  ): F[ExitCode] =
+    val render: Render[F] = Render(Http4sDsl[F])
+    val httpApp: HttpApp[F] = allRoutesComplete[F](serverState, render)
+    createServerResource(serverHostIP, serverHostPort, httpApp)
+      .use(server =>
+        U.logi(
+          s"Server started with base uri: '${server.baseUri.toString}'.",
+        ) *> Async[F].never,
+      )
+      .as(ExitCode.Success)
+
   def run: IO[ExitCode] =
     type F = IO
 
-    type CoreResources[F[_]] =
-      Resource[
-        F,
-        (
-            AppConfig,
-            ServerState[F],
-            http4s.client.Client[F],
-            Supervisor[F],
-            Transactor[F],
-            MemCache[F, Long, MovieDbModel.Director],
-            MemCache[F, Long, MovieDbModel.Actor],
-            MemCache[F, Long, MovieDbModel.Movie],
-        ),
-      ]
-
     Slf4jLogger.create[F] >>= { implicit logger =>
-      val configResource: Resource[F, AppConfig] =
-        Resource.eval(
-          IO.fromEither(
-            ConfigSource.default
-              .at("app-config")
-              .load[AppConfig]
-              .left
-              .map(pureconfig.error.ConfigReaderException[AppConfig]),
-          ),
-        )
-
       val coreResources: CoreResources[F] = for {
-        appConfig <- configResource
-        directorMemCache <- createDirectorMemCache[F](appConfig.getMemCacheConfig.getDirectorMemCacheConfig)
-        actorMemCache <- createActorMemCache[F](appConfig.getMemCacheConfig.getActorMemCacheConfig)
-        movieMemCache <- createMovieMemCache[F](appConfig.getMemCacheConfig.getMovieMemCacheConfig)
+        appConfig <- createConfigResource[F]()
+        appMemCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
         serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
         supervisor <- Supervisor[F](await = false)
         xa <- DoobieObj.xaResource(appConfig)
-      } yield (appConfig, serverState, httpClient, supervisor, xa, directorMemCache, actorMemCache, movieMemCache)
+      } yield (appConfig, serverState, httpClient, supervisor, xa, appMemCaches)
 
-      coreResources.use {
-        (appConfig, serverState, httpClient, supervisor, xa, directorMemCache, actorMemCache, movieMemCache) =>
-          val externalApiClientService: ExternalApiClientService[F] =
-            ExternalApiClientServiceLive.create[F](httpClient)
-          val movieRepositoryService: MovieRepositoryService[F] =
-            MovieRepositoryServiceLive.create(xa)
-          val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create
-          val serverStateUpdateService: ServerStateUpdateService[F] =
-            ServerStateUpdateServiceLive.create(serverState)
+      coreResources.use { (appConfig, serverState, httpClient, supervisor, xa, appMemCaches) =>
+        val externalApiClientService: ExternalApiClientService[F] =
+          ExternalApiClientServiceLive.create[F](httpClient)
+        val movieRepositoryService: MovieRepositoryService[F] =
+          MovieRepositoryServiceLive.create(xa)
+        val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create
+        val serverStateUpdateService: ServerStateUpdateService[F] =
+          ServerStateUpdateServiceLive.create(serverState)
 
-          val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
-          val render: Render[F] = Render(Http4sDsl[F])
+        val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
 
-          for {
-            _ <- HttpWorker.startWorkers(
-              appConfig.getBackendServerConfig,
-              movieRepositoryService,
-              externalApiClientService,
-              fileSystemService,
-              serverStateUpdateService,
-              serverState.jobQueue,
-              supervisor,
-              directorMemCache,
-              actorMemCache,
-              movieMemCache,
-              CacheStatus.CachesEnabled,
-            )
-            exitCode <- {
-              val httpApp: HttpApp[F] = allRoutesComplete[F](serverState, render)
-              createServerResource(serverHostIP, serverHostPort, httpApp)
-                .use(server =>
-                  U.logi(
-                    s"Server started with base uri: '${server.baseUri.toString}'.",
-                  ) *> Async[F].never,
-                )
-                .as(ExitCode.Success)
-            }
-          } yield exitCode
+        for {
+          _ <- HttpWorker.startWorkers(
+            appConfig.getBackendServerConfig,
+            movieRepositoryService,
+            externalApiClientService,
+            fileSystemService,
+            serverStateUpdateService,
+            serverState.jobQueue,
+            supervisor,
+            appMemCaches,
+            CacheStatus.CachesEnabled,
+          )
+          exitCode <- runHttpApp(serverState, serverHostIP, serverHostPort)
+        } yield exitCode
       }
     }

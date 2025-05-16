@@ -14,6 +14,7 @@ import app.{HttpWorker, MemCache, MovieApp, MovieDbModel}
 import app.movieapptests.ServiceStubs.{ExternalApiClientServiceStub, FileSystemServiceStub, ServerStateUpdateServiceStub}
 import app.AppConfig.BackendServerConfig
 import app.HttpWorker.CacheStatus
+import app.MovieApp.AppMemCaches
 import app.TestUtils.*
 import io.circe.literal.*
 import io.circe.Json
@@ -26,16 +27,13 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
   private val testBackendConfig: BackendServerConfig =
     BackendServerConfig(numberOfWorkers = 1, boundedQueueCapacity = 4)
 
-  private type CachesType[F[_]] =
-    (MemCache[F, Long, MovieDbModel.Director], MemCache[F, Long, MovieDbModel.Actor], MemCache[F, Long, MovieDbModel.Movie])
-
-  private def createCaches[F[_]: { Temporal, Logger }]: Resource[F, CachesType[F]] =
+  private def createCaches[F[_]: { Temporal, Logger }]: Resource[F, AppMemCaches[F]] =
     val workerCleanupDuration = 10.minutes
     (
       MemCache.createResource[F, Long, MovieDbModel.Director]("testDirectorCache", 1, workerCleanupDuration),
       MemCache.createResource[F, Long, MovieDbModel.Actor]("testActorCache", 1, workerCleanupDuration),
       MemCache.createResource[F, Long, MovieDbModel.Movie]("testMovieCache", 1, workerCleanupDuration),
-    ).tupled
+    ).mapN((d, a, m) => AppMemCaches[F](d, a, m))
 
   // --- Test Setup Resource ---
   // This resource now sets up and starts the actual HttpWorkers
@@ -47,7 +45,7 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
       (apiClientStub, fileSystemStub, serverUpdateStub) =
         (ExternalApiClientServiceStub[IO], FileSystemServiceStub[IO], ServerStateUpdateServiceStub[IO])
 
-      (directorCache, actorCache, movieCache) <- createCaches[IO]
+      appMemCaches <- createCaches[IO]
 
       // Start the actual HttpWorkers.
       // HttpWorker.startWorkers itself is F[Unit]; it launches background fibers via the supervisor.
@@ -65,9 +63,7 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
           serverStateUpdateService = serverUpdateStub,
           queue = serverState.jobQueue,
           supervisor = supervisor,
-          directorMemCache = directorCache,
-          actorMemCache = actorCache,
-          movieMemCache = movieCache,
+          appMemCaches,
           CacheStatus.CachesDisabled,
         ),
       )

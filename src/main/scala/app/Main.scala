@@ -28,8 +28,8 @@ object Main extends IOApp:
     // VecSummer.run
     // SquareLand.doIt()
     // IO.pure(ExitCode.Success)
-    // MovieApp.run
-    MemCache.run
+    MovieApp.run
+    // MemCache.run
 // Boo.Timing.doIt()
 //MovieApp.run(List.empty)
 //
