@@ -242,4 +242,4 @@ object HttpWorker:
 
     val numberOfWorkers = backendServer.getNumberOfWorkers
     (0 until numberOfWorkers).toVector
-      .traverse_(workerId => supervisor.supervise(worker(workerId, queue, jobExecutor)))
+      .traverseVoid(workerId => supervisor.supervise(worker(workerId, queue, jobExecutor)))
