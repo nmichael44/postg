@@ -89,17 +89,18 @@ object MovieApp:
       f: T => WebServiceResult,
   ): F[WebServiceResult] =
     val jobName = job.shortName
+    val prompt = s"Job '$jobName'"
     val res: F[Either[Throwable, JobResult]] = for {
       _ <- U.logi(msg)
       deferred <- Deferred[F, Either[Throwable, JobResult]]
-      _ <- U.logi(s"Queueing job '$jobName'.")
+      _ <- U.logi(s"$jobName: being queued.")
       _ <- serverState.jobQueue.offer(HttpWorker.Job(job, deferred))
-      _ <- U.logi(s"Job '$jobName' queued. Waiting for response.")
+      _ <- U.logi(s"$prompt: queued. Waiting for response.")
       outcome <- deferred.get // Wait for the answer
-      _ <- U.logi(s"Job '$jobName': Response received.")
+      _ <- U.logi(s"$prompt: Response received.")
       _ <- outcome match {
-        case Right(_) => U.logi(s"Job '$jobName': Successful response.")
-        case Left(e) => U.loge(e, s"Job '$jobName' failed. Returning internal server error.")
+        case Right(_) => U.logi(s"$prompt: Successful response.")
+        case Left(e) => U.loge(e, s"$prompt: Failed with exception.")
       }
     } yield outcome
 
