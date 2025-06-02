@@ -114,7 +114,7 @@
           <root url="jar://$USER_HOME$/AppData/Local/Coursier/cache/v1/https/repo1.maven.org/maven2/org/scalameta/scalafmt-sysops_2.12/3.8.5/scalafmt-sysops_2.12-3.8.5.jar!/" />
           <root url="jar://$USER_HOME$/AppData/Local/Coursier/cache/v1/https/repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar!/" />
           <root url="jar://$APPLICATION_PLUGINS_DIR$/Scala/repo/org/jetbrains/scala/sbt-idea-shell_2.12_1.0/2025.1.4/sbt-idea-shell_2.12_1.0-2025.1.4.jar!/" />
-          <root url="jar://$APPLICATION_PLUGINS_DIR$/Scala/repo/org/jetbrains/scala/sbt-structure-extractor_2.12_1.3/2025.1.5/sbt-structure-extractor-2025.1.5.jar!/" />
+          <root url="jar://$APPLICATION_PLUGINS_DIR$/Scala/repo/org/jetbrains/scala/sbt-structure-extractor_2.12_1.3/2025.1.9/sbt-structure-extractor-2025.1.9.jar!/" />
         </CLASSES>
         <JAVADOC />
         <SOURCES />
@@ -123,7 +123,7 @@
   </component>
   <component name="SbtModule">
     <option name="buildForURI" value="file:/$MODULE_DIR$/../../" />
-    <option name="imports" value="SUB:DOLLAR8705a447cd452f53135a.`root`, _root_.sbt.Keys._, _root_.sbt.ScriptedPlugin.autoImport._, _root_.sbt.plugins.JUnitXmlReportPlugin.autoImport._, _root_.sbt.plugins.MiniDependencyTreePlugin.autoImport._, _root_.org.scalafmt.sbt.ScalafmtPlugin.autoImport._, _root_.org.jetbrains.sbt.GenerateAllManagedSourcesPlugin.autoImport._, _root_.org.jetbrains.sbt.IdeaShellPlugin.autoImport._, _root_.sbt._, _root_.sbt.nio.Keys._, _root_.sbt.plugins.IvyPlugin, _root_.sbt.plugins.JvmPlugin, _root_.sbt.plugins.CorePlugin, _root_.sbt.ScriptedPlugin, _root_.sbt.plugins.SbtPlugin, _root_.sbt.plugins.SemanticdbPlugin, _root_.sbt.plugins.JUnitXmlReportPlugin, _root_.sbt.plugins.Giter8TemplatePlugin, _root_.sbt.plugins.MiniDependencyTreePlugin, _root_.org.scalafmt.sbt.ScalafmtPlugin, _root_.org.jetbrains.sbt.GenerateAllManagedSourcesPlugin, _root_.org.jetbrains.sbt.StructurePlugin, _root_.org.jetbrains.sbt.IdeaShellPlugin, _root_.scala.xml.{TopScope=&gt;SUB:DOLLARscope}" />
+    <option name="imports" value="SUB:DOLLAR456631aef919aebf309d.`root`, _root_.sbt.Keys._, _root_.sbt.ScriptedPlugin.autoImport._, _root_.sbt.plugins.JUnitXmlReportPlugin.autoImport._, _root_.sbt.plugins.MiniDependencyTreePlugin.autoImport._, _root_.org.scalafmt.sbt.ScalafmtPlugin.autoImport._, _root_.org.jetbrains.sbt.GenerateAllManagedSourcesPlugin.autoImport._, _root_.org.jetbrains.sbt.IdeaShellPlugin.autoImport._, _root_.sbt._, _root_.sbt.nio.Keys._, _root_.sbt.plugins.IvyPlugin, _root_.sbt.plugins.JvmPlugin, _root_.sbt.plugins.CorePlugin, _root_.sbt.ScriptedPlugin, _root_.sbt.plugins.SbtPlugin, _root_.sbt.plugins.SemanticdbPlugin, _root_.sbt.plugins.JUnitXmlReportPlugin, _root_.sbt.plugins.Giter8TemplatePlugin, _root_.sbt.plugins.MiniDependencyTreePlugin, _root_.org.scalafmt.sbt.ScalafmtPlugin, _root_.org.jetbrains.sbt.GenerateAllManagedSourcesPlugin, _root_.org.jetbrains.sbt.StructurePlugin, _root_.org.jetbrains.sbt.IdeaShellPlugin, _root_.scala.xml.{TopScope=&gt;SUB:DOLLARscope}" />
     <option name="resolvers" value="C:\Users\nmich\.ivy2\cache|ivy|true|Local cache, https://repo1.maven.org/maven2/|maven|public" />
   </component>
 </module>

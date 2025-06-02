@@ -12,6 +12,7 @@ lazy val circeVersion = "0.14.13"
 lazy val scalatestVersion = "3.2.18"
 lazy val pureConfigCoreVersion = "0.17.9"
 lazy val catsEffectTestingScalatestVersion = "1.6.0"
+lazy val http4sJwtAuthVersion = "2.0.7"
 
 lazy val root = (project in file("."))
   .settings(
@@ -37,6 +38,8 @@ libraryDependencies ++= Seq(
   "com.github.pureconfig" %% "pureconfig-core" % pureConfigCoreVersion,
   "org.typelevel" %% "log4cats-slf4j" % "2.7.0",
   "ch.qos.logback" % "logback-classic" % logbackVersion % Runtime,
+  "dev.profunktor" %% "http4s-jwt-auth" % http4sJwtAuthVersion,
+
   "org.typelevel" %% "cats-effect-testing-scalatest" % catsEffectTestingScalatestVersion % Test,
   "org.scalatest" %% "scalatest" % scalatestVersion % Test,
 )

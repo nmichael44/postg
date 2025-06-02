@@ -30,7 +30,7 @@ object HttpWorker:
     case CachesEnabled
     case CachesDisabled
 
-  private final class JobExecutor[F[_]: { Async as async, Logger as logger }](
+  private final class JobExecutor[F[_]: { Async as async, Logger }](
       mr: MovieRepositoryService[F],
       apiClient: ExternalApiClientService[F],
       fileSystemService: FileSystemService[F],
@@ -46,10 +46,9 @@ object HttpWorker:
     private def getDirectorsDetailsByName(j: JobKind.GetDirectorsDetailsByName): F[JobResult] =
       val (firstName, lastName) = (j.firstName, j.lastName)
 
-      for {
-        _ <- U.logi("Fetching directors details by name")
-        directorsDetails <- mr.getDirectorsDetails(firstName, lastName)
-      } yield JobResult.DirectorsDetailsByNameResult(directorsDetails)
+      U.logi("Fetching directors details by name") *>
+        mr.getDirectorsDetails(firstName, lastName)
+          .map(JobResult.DirectorsDetailsByNameResult.apply)
 
     private def getDetailsWithCache[T](
         itemName: String,
