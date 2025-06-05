@@ -22,24 +22,21 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
   def get(k: K): F[Option[V]] =
     temporal.realTimeInstant >>= { now =>
       r.modify { case cacheState0 @ CacheState(m0, s0, lruMap0, seqCounter0) =>
-        m0.get(k) match {
-          case Some(CacheElem(v, expiryOpt, seqCount)) =>
-            expiryOpt match {
-              // Item has an expiry, AND it is currently expired.
-              case Some(expiry) if hasExpired(expiry, now) =>
-                (cacheState0, None)
-              // This case covers two cases:
-              //   1. Item has an expiry, AND it is NOT currently expired.
-              //   2. Item has NO expiry (expiryOpt is None).
-              case _ =>
-                val m1 = m0.updated(k, CacheElem(v, expiryOpt, seqCounter0))
-                val s1 = s0
-                val lruMap1 = (lruMap0 - seqCount).updated(seqCounter0, k)
-                val seqCounter1 = seqCounter0 + 1
-                (CacheState(m1, s1, lruMap1, seqCounter1), v.some)
-            }
-          case None =>
-            (cacheState0, None)
+        m0.get(k).fold((cacheState0, None)) { case CacheElem(v, expiryOpt, seqCount) =>
+          expiryOpt match {
+            // Item has an expiry, AND it is currently expired.
+            case Some(expiry) if hasExpired(expiry, now) =>
+              (cacheState0, None)
+            // This case covers two cases:
+            //   1. Item has an expiry, AND it is NOT currently expired.
+            //   2. Item has NO expiry (expiryOpt is None).
+            case _ =>
+              val m1 = m0.updated(k, CacheElem(v, expiryOpt, seqCounter0))
+              val s1 = s0
+              val lruMap1 = (lruMap0 - seqCount).updated(seqCounter0, k)
+              val seqCounter1 = seqCounter0 + 1
+              (CacheState(m1, s1, lruMap1, seqCounter1), v.some)
+          }
         }
       }
     }

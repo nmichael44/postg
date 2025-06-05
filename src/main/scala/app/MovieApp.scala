@@ -8,6 +8,7 @@ import cats.Applicative
 
 import scala.annotation.switch
 import scala.concurrent.duration.*
+import scala.util.control.NoStackTrace
 
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
@@ -46,43 +47,43 @@ object MovieApp:
   ) extends ServerState[F]
 
   private[app] object LiveServerState:
-    def create[F[_]: Async](backendServer: BackendServerConfig): F[ServerState[F]] = {
+    def create[F[_]: Async](backendServer: BackendServerConfig): F[ServerState[F]] =
       val boundedQueueCapacity = backendServer.getBoundedQueueCapacity
       for {
         movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
         jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](boundedQueueCapacity)
 
       } yield LiveServerState[F](movieReqCounts, jobQueue)
-    }
 
-  private[app] enum WebServiceResult(val tag: Int):
-    case OkStringRes(s: String) extends WebServiceResult(WebServiceResult.OkStringResTag)
-    case OkJsonRes(json: Json) extends WebServiceResult(WebServiceResult.OkJsonResTag)
-    case NotFoundRes(s: String) extends WebServiceResult(WebServiceResult.NotFoundResTag)
-    case BadRequestRes(e: String) extends WebServiceResult(WebServiceResult.BadRequestResTag)
-    case InternalServerErrorRes extends WebServiceResult(WebServiceResult.InternalServerErrorResTag)
+  private[app] enum WebServiceResult:
+    case OkStringRes(s: String)
+    case OkJsonRes(json: Json)
+    case NotFoundRes(s: String)
+    case BadRequestRes(e: String)
+    case InternalServerErrorRes()
 
-  private object WebServiceResult:
-    inline val OkStringResTag = 0
-    inline val OkJsonResTag = 1
-    inline val NotFoundResTag = 2
-    inline val BadRequestResTag = 3
-    inline val InternalServerErrorResTag = 4
-
-  private[app] final class Render[F[_]: Applicative](dsl: Http4sDsl[F]):
-    import app.ImplicitConversions.castAs
+  private[app] final class Render[F[_]: Async as async](dsl: Http4sDsl[F]):
     import dsl.*
     import WebServiceResult.*
 
-    def apply(wsr: WebServiceResult): F[Response[F]] = (wsr.tag: @switch) match {
-      case OkStringResTag => Ok(wsr.castAs[OkStringRes].s)
-      case OkJsonResTag => Ok(wsr.castAs[OkJsonRes].json)
-      case NotFoundResTag => NotFound(wsr.castAs[NotFoundRes].s)
-      case BadRequestResTag => BadRequest(wsr.castAs[BadRequestRes].e)
-      case InternalServerErrorResTag => InternalServerError()
-    }
+    private val NotImplemented: Exception =
+      new Exception("MovieRepositoryService not properly overridden in test") with NoStackTrace
 
-  private def jobHandler[F[_]: { Async as async, Logger as logger }, T <: JobResult](
+    private val resHandlerMap: Map[Class[? <: WebServiceResult], WebServiceResult => F[Response[F]]] = Map(
+      classOf[OkStringRes] -> { wsr => Ok(wsr.asInstanceOf[OkStringRes].s) },
+      classOf[OkJsonRes] -> { wsr => Ok(wsr.asInstanceOf[OkJsonRes].json) },
+      classOf[NotFoundRes] -> { wsr => NotFound(wsr.asInstanceOf[NotFoundRes].s) },
+      classOf[BadRequestRes] -> { wsr => BadRequest(wsr.asInstanceOf[BadRequestRes].e) },
+      classOf[InternalServerErrorRes] -> { _ => InternalServerError() },
+    )
+
+    def apply(wsr: WebServiceResult): F[Response[F]] =
+      resHandlerMap
+        .get(wsr.getClass)
+        .map(_(wsr))
+        .getOrElse(async.raiseError(NotImplemented))
+
+  private def jobHandler[F[_]: { Async as async, Logger }, T <: JobResult](
       msg: String,
       serverState: ServerState[F],
       job: JobKind,
@@ -110,7 +111,7 @@ object MovieApp:
       resEither: Either[Throwable, JobResult],
       f: T => WebServiceResult,
   ): WebServiceResult =
-    resEither.fold(_ => WebServiceResult.InternalServerErrorRes, jr => f(jr.asInstanceOf[T]))
+    resEither.fold(_ => WebServiceResult.InternalServerErrorRes(), jr => f(jr.asInstanceOf[T]))
 
   private def getDirectorsDetailsByName[F[_]: { Async, Logger as logger }](
       req: Request[F],

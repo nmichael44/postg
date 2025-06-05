@@ -25,6 +25,9 @@ object Main extends IOApp:
   override def run(args: List[String]): IO[ExitCode] = // Refs.run(args
     implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 
+    println(f(Z.A))
+    println(f(Z.G))
+
     // VecSummer.run
     // SquareLand.doIt()
     // IO.pure(ExitCode.Success)
@@ -35,6 +38,21 @@ object Main extends IOApp:
 //
 
 // MovieApp.run(args)
+
+  enum Z:
+    case A, B, C, D, E, F, G
+
+  def f(n: Z): Int =
+    import Z.*
+    n match {
+      case A => 23
+      case B => 12
+      case C => -1
+      case D => 4
+      case E => 12
+      case F => -11
+      case G => 21
+    }
 
 //  private def readInt[F[_]: MonadCancelThrow](console: Console[F]): F[Option[Int]] =
 //    console.readLine.map(_.toIntOption)

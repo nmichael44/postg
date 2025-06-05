@@ -7,6 +7,7 @@ import cats.syntax.all.*
 
 import scala.annotation.switch
 import scala.concurrent.duration.*
+import scala.util.control.NoStackTrace
 
 import app.services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
 import app.AppConfig.BackendServerConfig
@@ -43,7 +44,8 @@ object HttpWorker:
     private val actorMemCache: MemCache[F, Long, MovieDbModel.Actor] = appMemCaches.actorCache
     private val movieMemCache: MemCache[F, Long, MovieDbModel.Movie] = appMemCaches.movieCache
 
-    private def getDirectorsDetailsByName(j: JobKind.GetDirectorsDetailsByName): F[JobResult] =
+    private def getDirectorsDetailsByName(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.GetDirectorsDetailsByName]
       val (firstName, lastName) = (j.firstName, j.lastName)
 
       U.logi("Fetching directors details by name") *>
@@ -82,7 +84,8 @@ object HttpWorker:
 
     private val DirectorCachingDuration: FiniteDuration = 2.minutes
 
-    private def getDirectorDetails(j: JobKind.GetDirectorDetails): F[JobResult] =
+    private def getDirectorDetails(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.GetDirectorDetails]
       getDetailsWithCache(
         "Director",
         j.directorId,
@@ -92,7 +95,8 @@ object HttpWorker:
         JobResult.DirectorDetailsResult.apply,
       )
 
-    private def getMoviesByDirector(j: JobKind.GetMoviesByDirector): F[JobResult] =
+    private def getMoviesByDirector(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.GetMoviesByDirector]
       val directorId = j.directorId
       for {
         _ <- U.logi(s"Fetching movies for director ID: $directorId")
@@ -101,7 +105,8 @@ object HttpWorker:
 
     private val ActorCachingDuration: FiniteDuration = 2.minutes
 
-    private def getActorDetails(j: JobKind.GetActorDetails): F[JobResult] =
+    private def getActorDetails(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.GetActorDetails]
       getDetailsWithCache(
         "Actor",
         j.actorId,
@@ -113,7 +118,8 @@ object HttpWorker:
 
     private val MovieCachingDuration: FiniteDuration = 2.minutes
 
-    private def getMovie(j: JobKind.GetMovie): F[JobResult] =
+    private def getMovie(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.GetMovie]
       getDetailsWithCache(
         "Movie",
         j.movieId,
@@ -129,7 +135,8 @@ object HttpWorker:
         movieDetailsMap <- mr.getMovieDetails(NonEmptyVector.one(movieId))
       } yield JobResult.MovieDetailsResult(movieDetailsMap.get(movieId))
 
-    private def getMovieWithCounting(j: JobKind.GetMovieWithCounting): F[JobResult] =
+    private def getMovieWithCounting(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.GetMovieWithCounting]
       val movieId = j.movieId
       for {
         _ <- U.logi(s"Fetching movie details for ID $movieId with counting.")
@@ -140,21 +147,24 @@ object HttpWorker:
         )
       } yield JobResult.MovieWithCountingResult(movieDetailsMap.get(movieId))
 
-    private def createMovie(j: JobKind.CreateMovie): F[JobResult] =
+    private def createMovie(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.CreateMovie]
       val (title, year) = (j.title, j.year)
       for {
         _ <- U.logi(s"Creating movie with title: '$title' and year: '$year'.")
         movieId <- mr.createMovie(title, year)
       } yield JobResult.CreateMovieResult(movieId)
 
-    private def getFileContent(j: JobKind.GetFileContent): F[JobResult] =
+    private def getFileContent(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.GetFileContent]
       val fileName = j.fileName
       for {
         _ <- U.logi(s"Asked to read file: '$fileName'.")
         res <- fileSystemService.readFileContent(fileName)
       } yield JobResult.FileContentResult(res)
 
-    private def readTwoFilesInParallel(j: JobKind.ReadTwoFilesInParallel): F[JobResult] =
+    private def readTwoFilesInParallel(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.ReadTwoFilesInParallel]
       val (fileName1, fileName2) = (j.fileName1, j.fileName2)
       for {
         _ <- U.logi(s"Reading the two files in parallel.")
@@ -164,13 +174,15 @@ object HttpWorker:
           .readTwoFilesInParallel(fileName1, fileName2)
       } yield JobResult.TwoFilesInParallelResult(res)
 
-    private def fetchCompanyData(j: JobKind.FetchCompanyData): F[JobResult] =
+    private def fetchCompanyData(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.FetchCompanyData]
       val companyName = j.companyName
       apiClient
         .fetchCompanyData(companyName)
         .map(JobResult.CompanyDataResult.apply)
 
-    private def fetchJsonObject(j: JobKind.FetchJsonObject): F[JobResult] =
+    private def fetchJsonObject(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.FetchJsonObject]
       for {
         _ <- U.logi("Fetching some json object recursively.")
         obj <- apiClient
@@ -180,19 +192,28 @@ object HttpWorker:
           .map(_.asJson)
       } yield JobResult.JsonObjectResult(obj)
 
+    private val jobHandlersMap: Map[Class[? <: JobKind], JobKind => F[JobResult]] = Map(
+      classOf[JobKind.GetDirectorsDetailsByName] -> getDirectorsDetailsByName,
+      classOf[JobKind.GetDirectorDetails] -> getDirectorDetails,
+      classOf[JobKind.GetActorDetails] -> getActorDetails,
+      classOf[JobKind.GetMoviesByDirector] -> getMoviesByDirector,
+      classOf[JobKind.GetMovie] -> getMovie,
+      classOf[JobKind.GetMovieWithCounting] -> getMovieWithCounting,
+      classOf[JobKind.CreateMovie] -> createMovie,
+      classOf[JobKind.GetFileContent] -> getFileContent,
+      classOf[JobKind.ReadTwoFilesInParallel] -> readTwoFilesInParallel,
+      classOf[JobKind.FetchCompanyData] -> fetchCompanyData,
+      classOf[JobKind.FetchJsonObject] -> fetchJsonObject,
+    )
+
+    private val NotImplemented: Exception =
+      new Exception("MovieRepositoryService not properly overridden in test") with NoStackTrace
+
     def executeJob(job: JobKind): F[JobResult] =
-      (job.tag: @switch) match
-        case JobKind.GetDirectorsDetailsByNameTag => getDirectorsDetailsByName(job.castAs[JobKind.GetDirectorsDetailsByName])
-        case JobKind.GetDirectorDetailsTag => getDirectorDetails(job.castAs[JobKind.GetDirectorDetails])
-        case JobKind.GetActorDetailsTag => getActorDetails(job.castAs[JobKind.GetActorDetails])
-        case JobKind.GetMoviesByDirectorTag => getMoviesByDirector(job.castAs[JobKind.GetMoviesByDirector])
-        case JobKind.GetMovieTag => getMovie(job.castAs[JobKind.GetMovie])
-        case JobKind.GetMovieWithCountingTag => getMovieWithCounting(job.castAs[JobKind.GetMovieWithCounting])
-        case JobKind.CreateMovieTag => createMovie(job.castAs[JobKind.CreateMovie])
-        case JobKind.GetFileContentTag => getFileContent(job.castAs[JobKind.GetFileContent])
-        case JobKind.ReadTwoFilesInParallelTag => readTwoFilesInParallel(job.castAs[JobKind.ReadTwoFilesInParallel])
-        case JobKind.FetchCompanyDataTag => fetchCompanyData(job.castAs[JobKind.FetchCompanyData])
-        case JobKind.FetchJsonObjectTag => fetchJsonObject(job.castAs[JobKind.FetchJsonObject])
+      jobHandlersMap
+        .get(job.getClass)
+        .map(_(job))
+        .getOrElse(async.raiseError(NotImplemented))
 
   private def worker[F[_]: { Async as async, Logger as logger }](
       workerId: Int,

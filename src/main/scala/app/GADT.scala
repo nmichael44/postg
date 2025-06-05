@@ -12,7 +12,12 @@ object GADT:
     s match
       case SInt => 0
       case SBoolean => false
-      case SOption(_) => None
+      case SOption(n) =>
+        n match {
+          case SInt => Some(0)
+          case SBoolean => Some(false)
+          case SOption(_) => None
+        }
 
   private val xi: Int = zero(SInt)
   private val xb: Boolean = zero(SBoolean)
@@ -23,3 +28,4 @@ object GADT:
   println(xb)
   println(xoi)
   println(xob)
+
