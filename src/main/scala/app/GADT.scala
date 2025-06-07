@@ -28,4 +28,3 @@ object GADT:
   println(xb)
   println(xoi)
   println(xob)
-

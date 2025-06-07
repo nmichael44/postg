@@ -2,6 +2,8 @@ package app
 
 import java.time.LocalDate
 
+import io.circe.generic.auto.*
+
 object MovieDbModel:
   final case class DirectorPath(firstName: Option[String], lastName: Option[String]):
     override def toString: String =
@@ -30,3 +32,7 @@ object MovieDbModel:
       movies: Vector[MovieDbModel.Movie],
   ):
     override def toString: String = s"DirectorWithMovies($director, $movies)"
+
+  final case class UserDetails(loginName: String, password: String)
+
+  final case class UserDetailsWithId(userId: Int, loginName: String, password: String)

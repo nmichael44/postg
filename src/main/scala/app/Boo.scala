@@ -17,7 +17,7 @@ object Boo:
       MyIO(() => println(s))
   }
 
-  object Printing extends App {
+  object Printing /* extends App */ {
     private val hello: MyIO[Unit] = MyIO.putStr("hello!")
     private val world: MyIO[Unit] = MyIO.putStr("world!")
     private val helloWorld: MyIO[Unit] = for {
@@ -28,7 +28,7 @@ object Boo:
     helloWorld.unsafeRun()
   }
 
-  object Timing extends App {
+  object Timing /* extends App */ {
     private val clock: MyIO[Long] =
       MyIO(() => System.currentTimeMillis)
 

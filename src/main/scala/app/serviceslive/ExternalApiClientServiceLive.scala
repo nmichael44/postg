@@ -20,7 +20,7 @@ private final class ExternalApiClientServiceLive[F[_]: Async as async] private (
     doRequest(client, request)
 
   def fetchAsJson[A: Decoder](uri: org.http4s.Uri): F[A] =
-    client.expect[A](uri)(jsonOf[F, A])
+    client.expect[A](uri)(using jsonOf[F, A])
 
   private def doRequest(client: Client[F], request: Request[F]): F[String] =
     client.run(request).use { response =>

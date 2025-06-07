@@ -1,47 +1,48 @@
 ThisBuild / version := "0.1.0-SNAPSHOT"
+ThisBuild / scalaVersion := "3.7.1"
 
-lazy val scalaCompilerVersion = "3.6.4"
-
-ThisBuild / scalaVersion := scalaCompilerVersion
-
-lazy val postgresVersion = "42.7.5"
-lazy val logbackVersion = "1.5.18"
-lazy val doobieVersion = "1.0.0-RC9"
-lazy val http4sVersion = "0.23.30"
-lazy val circeVersion = "0.14.13"
-lazy val scalatestVersion = "3.2.18"
-lazy val pureConfigCoreVersion = "0.17.9"
-lazy val catsEffectTestingScalatestVersion = "1.6.0"
-lazy val http4sJwtAuthVersion = "2.0.7"
+val postgresVersion = "42.7.6"
+val log4catsSlf4jVersion = "2.7.1"
+val logbackVersion = "1.5.18"
+val doobieVersion = "1.0.0-RC9"
+val http4sVersion = "0.23.30"
+val circeVersion = "0.14.13"
+val scalatestVersion = "3.2.19"
+val pureConfigCoreVersion = "0.17.9"
+val catsEffectTestingScalatestVersion = "1.6.0"
+val http4sJwtAuthVersion = "2.0.8"
 
 lazy val root = (project in file("."))
   .settings(
     name := "postg",
+    scalacOptions ++= Seq("-deprecation", "-Xmax-inlines:64"),
+    libraryDependencies ++= Seq(
+      "org.postgresql" % "postgresql" % postgresVersion,
+      "org.tpolecat" %% "doobie-core" % doobieVersion,
+      "org.tpolecat" %% "doobie-postgres" % doobieVersion,
+      "org.tpolecat" %% "doobie-specs2" % doobieVersion,
+      "org.tpolecat" %% "doobie-hikari" % doobieVersion,
+      "org.http4s" %% "http4s-ember-client" % http4sVersion,
+      "org.http4s" %% "http4s-dsl" % http4sVersion,
+      "org.http4s" %% "http4s-ember-server" % http4sVersion,
+      "org.http4s" %% "http4s-circe" % http4sVersion,
+      "io.circe" %% "circe-core" % circeVersion,
+      "io.circe" %% "circe-generic" % circeVersion,
+      "io.circe" %% "circe-parser" % circeVersion,
+      "io.circe" %% "circe-literal" % circeVersion,
+      "com.github.pureconfig" %% "pureconfig-core" % pureConfigCoreVersion,
+      "org.typelevel" %% "log4cats-slf4j" % log4catsSlf4jVersion,
+      "ch.qos.logback" % "logback-classic" % logbackVersion % Runtime,
+      "dev.profunktor" %% "http4s-jwt-auth" % http4sJwtAuthVersion,
+      "org.typelevel" %% "cats-effect-testing-scalatest" % catsEffectTestingScalatestVersion % Test,
+      "org.scalatest" %% "scalatest" % scalatestVersion % Test,
+    ),
+    assembly / mainClass := Some("app.Main"),
+    assembly / assemblyJarName := "postg.jar",
+    assembly / assemblyMergeStrategy := {
+      case "module-info.class" => MergeStrategy.discard
+      case x =>
+        val oldStrategy = (assembly / assemblyMergeStrategy).value
+        oldStrategy(x)
+    },
   )
-
-scalacOptions += "-deprecation"
-
-libraryDependencies ++= Seq(
-  "org.postgresql" % "postgresql" % postgresVersion,
-  "org.tpolecat" %% "doobie-core" % doobieVersion,
-  "org.tpolecat" %% "doobie-postgres" % doobieVersion, // Postgres driver 42.6.0 + type mappings.
-  "org.tpolecat" %% "doobie-specs2" % doobieVersion, // Specs2 support for typechecking statements.
-  "org.tpolecat" %% "doobie-hikari" % doobieVersion, // HikariCP transactor.
-  "org.http4s" %% "http4s-ember-client" % http4sVersion,
-  "org.http4s" %% "http4s-dsl" % http4sVersion,
-  "org.http4s" %% "http4s-ember-server" % http4sVersion,
-  "org.http4s" %% "http4s-circe" % http4sVersion,
-  "io.circe" %% "circe-core" % circeVersion,
-  "io.circe" %% "circe-generic" % circeVersion,
-  "io.circe" %% "circe-parser" % circeVersion,
-  "io.circe" %% "circe-literal" % circeVersion,
-  "com.github.pureconfig" %% "pureconfig-core" % pureConfigCoreVersion,
-  "org.typelevel" %% "log4cats-slf4j" % "2.7.0",
-  "ch.qos.logback" % "logback-classic" % logbackVersion % Runtime,
-  "dev.profunktor" %% "http4s-jwt-auth" % http4sJwtAuthVersion,
-
-  "org.typelevel" %% "cats-effect-testing-scalatest" % catsEffectTestingScalatestVersion % Test,
-  "org.scalatest" %% "scalatest" % scalatestVersion % Test,
-)
-
-Compile / run / fork := false

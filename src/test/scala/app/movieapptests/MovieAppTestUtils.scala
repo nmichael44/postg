@@ -25,3 +25,9 @@ object MovieAppTestUtils:
       mc.raiseError(MovieRepositoryServiceNotImplemented)
     override def createMovie(title: String, year: Int): F[Long] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
+    override def createSystemUser(loginName: String, password: String): F[Int] =
+      mc.raiseError(MovieRepositoryServiceNotImplemented)
+    override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsWithId]] =
+      mc.raiseError(MovieRepositoryServiceNotImplemented)
+    override def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsWithId]] =
+      mc.raiseError(MovieRepositoryServiceNotImplemented)

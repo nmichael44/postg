@@ -53,6 +53,15 @@ final class MovieRepositoryInMemory[F[_]: Async as async](
       (m.updated(movieId, MovieDbModel.Movie(movieId, title, year)), movieId)
     }
 
+  override def createSystemUser(loginName: String, password: String): F[Int] =
+    ???
+
+  override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsWithId]] =
+    ???
+
+  override def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsWithId]] =
+    ???
+
 object MovieRepositoryInMemory:
   def createWithDefaultDb[F[_]: Async]: F[MovieRepositoryService[F]] =
     create(Directors, Actors, Movies, MovieToDirector)

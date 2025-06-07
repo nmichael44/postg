@@ -12,7 +12,7 @@ import scala.util.control.NoStackTrace
 import app.services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
 import app.AppConfig.BackendServerConfig
 import app.ImplicitConversions.*
-import app.JobSpecs.{JobKind, JobResult}
+import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
 import app.MovieApp.AppMemCaches
 import app.Utils as U
 import io.circe.*
@@ -182,7 +182,6 @@ object HttpWorker:
         .map(JobResult.CompanyDataResult.apply)
 
     private def fetchJsonObject(jk: JobKind): F[JobResult] =
-      val j = jk.asInstanceOf[JobKind.FetchJsonObject]
       for {
         _ <- U.logi("Fetching some json object recursively.")
         obj <- apiClient
@@ -192,7 +191,36 @@ object HttpWorker:
           .map(_.asJson)
       } yield JobResult.JsonObjectResult(obj)
 
-    private val jobHandlersMap: Map[Class[? <: JobKind], JobKind => F[JobResult]] = Map(
+    private def createSystemUser(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.CreateSystemUser]
+      val (loginName, password) = (j.loginName, j.password)
+
+      for {
+        _ <- U.logi("Creating system user.")
+        userId <- mr.createSystemUser(loginName, password)
+      } yield JobResult.CreateSystemUserResult(userId)
+
+    private def fetchSystemUserByLoginName(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.FetchSystemUserByLoginName]
+      val loginName = j.loginName
+
+      for {
+        _ <- U.logi("Fetching system user by loginName.")
+        res <- mr.fetchSystemUserByLoginName(loginName).map(_.toRight(FetchSystemUserError.NotFound))
+      } yield JobResult.FetchSystemUserByLoginNameResult(res)
+
+    private def fetchSystemUserByUserId(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.FetchSystemUserByUserId]
+      val userIdStr = j.userIdStr
+
+      for {
+        _ <- U.logi("Fetching system user by userId.")
+        res <- userIdStr.toIntOption.fold(async.pure(Left(FetchSystemUserError.BadInput))) { userId =>
+          mr.fetchSystemUserByUserId(userId).map(_.toRight(FetchSystemUserError.NotFound))
+        }
+      } yield JobResult.FetchSystemUserByUserIdResult(res)
+
+    private val JobHandlersMap: Map[Class[? <: JobKind], JobKind => F[JobResult]] = Map(
       classOf[JobKind.GetDirectorsDetailsByName] -> getDirectorsDetailsByName,
       classOf[JobKind.GetDirectorDetails] -> getDirectorDetails,
       classOf[JobKind.GetActorDetails] -> getActorDetails,
@@ -204,16 +232,19 @@ object HttpWorker:
       classOf[JobKind.ReadTwoFilesInParallel] -> readTwoFilesInParallel,
       classOf[JobKind.FetchCompanyData] -> fetchCompanyData,
       classOf[JobKind.FetchJsonObject] -> fetchJsonObject,
+      classOf[JobKind.CreateSystemUser] -> createSystemUser,
+      classOf[JobKind.FetchSystemUserByLoginName] -> fetchSystemUserByLoginName,
+      classOf[JobKind.FetchSystemUserByUserId] -> fetchSystemUserByUserId,
     )
 
-    private val NotImplemented: Exception =
-      new Exception("MovieRepositoryService not properly overridden in test") with NoStackTrace
+    private def misingJobImplementationException(job: JobKind): Exception =
+      new Exception(s"JobHandlersMap does not contain an implementation for class '${job.shortName}'.") with NoStackTrace
 
     def executeJob(job: JobKind): F[JobResult] =
-      jobHandlersMap
+      JobHandlersMap
         .get(job.getClass)
         .map(_(job))
-        .getOrElse(async.raiseError(NotImplemented))
+        .getOrElse(async.raiseError(misingJobImplementationException(job)))
 
   private def worker[F[_]: { Async as async, Logger as logger }](
       workerId: Int,

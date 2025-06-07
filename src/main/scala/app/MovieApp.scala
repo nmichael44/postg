@@ -6,17 +6,14 @@ import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
 import cats.Applicative
 
-import scala.annotation.switch
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
-
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
 import app.HttpWorker.CacheStatus
-import app.JobSpecs.{JobKind, JobResult}
-import app.JobSpecs.JobKind.{CreateMovie, FetchCompanyData, FetchJsonObject, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, ReadTwoFilesInParallel}
-import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FileContentResult, JsonObjectResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
-import app.MovieApp.AppMemCaches
+import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
+import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchCompanyData, FetchJsonObject, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, ReadTwoFilesInParallel}
+import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, FileContentResult, JsonObjectResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
@@ -124,7 +121,7 @@ object MovieApp:
           "Fetching directors details by name.",
           serverState,
           GetDirectorsDetailsByName(directorPath.firstName, directorPath.lastName),
-          dirs => WebServiceResult.OkJsonRes(dirs.directors.asJson),
+          dirs => WebServiceResult.OkJsonRes(dirs.asJson),
         )
       }
 
@@ -178,7 +175,7 @@ object MovieApp:
       "Fetching movies by director Id.",
       serverState,
       GetMoviesByDirector(directorId),
-      mvs => WebServiceResult.OkJsonRes(mvs.movies.asJson),
+      mvs => WebServiceResult.OkJsonRes(mvs.asJson),
     )
 
   private def getMovie[F[_]: { Async, Logger as logger }](
@@ -214,7 +211,7 @@ object MovieApp:
       "Creating new movie.",
       serverState,
       CreateMovie(title, year),
-      cmr => WebServiceResult.OkStringRes(cmr.movieId.toString),
+      cmr => WebServiceResult.OkJsonRes(cmr.asJson),
     )
 
   private def getFileContent[F[_]: { Async, Logger as logger }](
@@ -256,6 +253,52 @@ object MovieApp:
       jor => WebServiceResult.OkJsonRes(jor.json),
     )
 
+  private given [F[_]: Async]: EntityDecoder[F, MovieDbModel.UserDetails] =
+    jsonOf[F, MovieDbModel.UserDetails]
+
+  def createSystemUser[F[_]: { Async, Logger }](req: Request[F], serverState: ServerState[F]): F[WebServiceResult] =
+    req.as[MovieDbModel.UserDetails] >>= { userDetails =>
+      jobHandler[F, CreateSystemUserResult](
+        "Creating system user.",
+        serverState,
+        CreateSystemUser(userDetails.loginName, userDetails.password),
+        csur => WebServiceResult.OkJsonRes(csur.asJson),
+      )
+    }
+
+  def fetchSystemUserByLoginName[F[_]: { Async, Logger }](
+      loginName: String,
+      serverState: ServerState[F],
+  ): F[WebServiceResult] =
+    jobHandler[F, FetchSystemUserByLoginNameResult](
+      "Fetching system user by loginName.",
+      serverState,
+      FetchSystemUserByLoginName(loginName),
+      { case FetchSystemUserByLoginNameResult(res) =>
+        res match {
+          case Left(_) => WebServiceResult.NotFoundRes(s"The given loginName '$loginName' was not found.")
+          case Right(r) => WebServiceResult.OkJsonRes(r.asJson)
+        }
+      },
+    )
+
+  def fetchSystemUserByUserId[F[_]: { Async, Logger }](
+      userIdStr: String,
+      serverState: ServerState[F],
+  ): F[WebServiceResult] =
+    jobHandler[F, FetchSystemUserByUserIdResult](
+      "Fetching system user by UserId.",
+      serverState,
+      FetchSystemUserByUserId(userIdStr),
+      { case FetchSystemUserByUserIdResult(res) =>
+        res match {
+          case Left(FetchSystemUserError.NotFound) => WebServiceResult.NotFoundRes(s"The given userId '$userIdStr' was not found.")
+          case Left(FetchSystemUserError.BadInput) => WebServiceResult.BadRequestRes(s"The given userId '$userIdStr' was not a valid integer.")
+          case Right(r) => WebServiceResult.OkJsonRes(r.asJson)
+        }
+      },
+    )
+
   private def routesDefinition[F[_]: { Async, Logger }](
       serverState: ServerState[F],
   ): PartialFunction[Request[F], F[WebServiceResult]] =
@@ -291,6 +334,12 @@ object MovieApp:
       fetchCompanyData(companyName, serverState)
     case GET -> Root / "getJsonObject" =>
       fetchJasonObject(serverState)
+    case req @ POST -> Root / "createSystemUser" =>
+      createSystemUser(req, serverState)
+    case GET -> Root / "fetchSystemUserByLoginName" / loginName =>
+      fetchSystemUserByLoginName(loginName, serverState)
+    case GET -> Root / "fetchSystemUserByUserId" / userIdStr =>
+      fetchSystemUserByUserId(userIdStr, serverState)
 
   private def routes[F[_]: { Async, Logger }](
       serverState: ServerState[F],

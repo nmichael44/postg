@@ -22,3 +22,9 @@ trait MovieRepositoryService[F[_]]:
   def getMovieDetails(movieIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Movie]]
 
   def createMovie(title: String, year: Int): F[Long]
+
+  def createSystemUser(loginName: String, password: String): F[Int]
+
+  def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsWithId]]
+
+  def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsWithId]]

@@ -5,6 +5,7 @@ import cats.effect.Async
 
 import app.services.MovieRepositoryService
 import app.MovieDbModel
+import app.MovieDbModel.UserDetailsWithId
 import doobie.implicits.*
 import doobie.postgres.implicits.*
 import doobie.util.transactor.Transactor
@@ -90,6 +91,23 @@ private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transac
   override def createMovie(title: String, year: Int): F[Long] =
     sql"""insert into movies (title, year) values($title, $year)""".update
       .withUniqueGeneratedKeys[Long]("movieid")
+      .transact(xa)
+
+  override def createSystemUser(loginName: String, password: String): F[Int] =
+    sql"""insert into systemUsers (loginName, hashedPassword) values($loginName, $password)""".update
+      .withUniqueGeneratedKeys[Int]("userid")
+      .transact(xa)
+
+  override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsWithId]] =
+    sql"""select userId, loginName, hashedPassword from systemUsers where loginName = $loginName"""
+      .query[MovieDbModel.UserDetailsWithId]
+      .option
+      .transact(xa)
+
+  override def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsWithId]] =
+    sql"""select userId, loginName, hashedPassword from systemUsers where userId = $userId"""
+      .query[MovieDbModel.UserDetailsWithId]
+      .option
       .transact(xa)
 
 object MovieRepositoryServiceLive:
