@@ -11,6 +11,7 @@ val scalatestVersion = "3.2.19"
 val pureConfigCoreVersion = "0.17.9"
 val catsEffectTestingScalatestVersion = "1.6.0"
 val http4sJwtAuthVersion = "2.0.8"
+val password4jVersion = "1.8.3"
 
 lazy val root = (project in file("."))
   .settings(
@@ -34,6 +35,7 @@ lazy val root = (project in file("."))
       "org.typelevel" %% "log4cats-slf4j" % log4catsSlf4jVersion,
       "ch.qos.logback" % "logback-classic" % logbackVersion % Runtime,
       "dev.profunktor" %% "http4s-jwt-auth" % http4sJwtAuthVersion,
+      "com.password4j" % "password4j" % password4jVersion,
       "org.typelevel" %% "cats-effect-testing-scalatest" % catsEffectTestingScalatestVersion % Test,
       "org.scalatest" %% "scalatest" % scalatestVersion % Test,
     ),

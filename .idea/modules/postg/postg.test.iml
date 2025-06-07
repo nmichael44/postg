@@ -33,6 +33,7 @@
     <orderEntry type="library" name="sbt: org.typelevel:log4cats-slf4j_3:2.7.1:jar" level="project" />
     <orderEntry type="library" name="sbt: ch.qos.logback:logback-classic:1.5.18:jar" level="project" />
     <orderEntry type="library" name="sbt: dev.profunktor:http4s-jwt-auth_3:2.0.8:jar" level="project" />
+    <orderEntry type="library" name="sbt: com.password4j:password4j:1.8.3:jar" level="project" />
     <orderEntry type="library" name="sbt: org.typelevel:cats-effect-testing-scalatest_3:1.6.0:jar" level="project" />
     <orderEntry type="library" name="sbt: org.scalatest:scalatest_3:3.2.19:jar" level="project" />
     <orderEntry type="library" name="sbt: org.scala-lang:scala-library:2.13.16:jar" level="project" />
