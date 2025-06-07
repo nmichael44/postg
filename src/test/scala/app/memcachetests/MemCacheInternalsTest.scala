@@ -55,10 +55,10 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
         for {
           nowBeforePuts <- IO.realTimeInstant
 
-          _ <- cache.put(k1, v1) // seqCounter becomes 1 (k1 -> seq 0)
+          _ <- cache.put(k1, v1)                   // seqCounter becomes 1 (k1 -> seq 0)
           _ <- cache.put(k2, v2, k2ExpiryDuration) // seqCounter becomes 2 (k2 -> seq 1)
-          _ <- cache.put(k3, v3) // seqCounter becomes 3 (k3 -> seq 2)
-          _ <- cache.get(k1) // k1 accessed, its seq should update to 3. seqCounter becomes 4.
+          _ <- cache.put(k3, v3)                   // seqCounter becomes 3 (k3 -> seq 2)
+          _ <- cache.get(k1)                       // k1 accessed, its seq should update to 3. seqCounter becomes 4.
 
           internalState <- cache.getInternalCacheState
           (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
@@ -120,7 +120,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
         } yield
           // --- Assertions on mainMap ---
-          (mainMap.size shouldBe cacheCapacity) ~&> // Should be 2
+          (mainMap.size shouldBe cacheCapacity) ~&>   // Should be 2
             (mainMap.contains(k1) shouldBe false) ~&> // k1 evicted
             (mainMap.contains(k2) shouldBe true) ~&>
             (mainMap(k2).v shouldBe v2) ~&>
@@ -159,9 +159,9 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
 
       createCache[String, Int](capacity = cacheCapacity, cleanupDuration = cleanupInterval).use { cache =>
         for {
-          _ <- cache.put(kExp1, vExp1, exp1Duration) // seq 0
-          _ <- cache.put(kNoExp, vNoExp) // seq 1
-          _ <- cache.put(kExp2, vExp2, exp2Duration) // seq 2
+          _ <- cache.put(kExp1, vExp1, exp1Duration)          // seq 0
+          _ <- cache.put(kNoExp, vNoExp)                      // seq 1
+          _ <- cache.put(kExp2, vExp2, exp2Duration)          // seq 2
           _ <- cache.put(kLongExp, vLongExp, longExpDuration) // seq 3
           // global seqCounter is now 4
 
@@ -236,7 +236,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       val longExpiry = 1.hour
 
       val (n1, n2, n3) = (40, 30, 20) // Number of items for each category
-      val (m1, m2) = (10, 5) // Number of items to 'get' for LRU update
+      val (m1, m2) = (10, 5)          // Number of items to 'get' for LRU update
 
       // Generate test data
       val shortExpiryPairs = (1 to n1).map(i => (s"Short$i", i)).toVector
@@ -281,7 +281,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
       val longExpiry = 1.hour
 
       val (n1, n2, n3) = (40, 30, 20) // Number of items for each category
-      val (m1, m2) = (10, 5) // Number of items to 'get' for LRU update
+      val (m1, m2) = (10, 5)          // Number of items to 'get' for LRU update
 
       // Generate test data
       val shortExpiryPairs = (1 to n1).map(i => (s"ShortPar$i", i)).toVector

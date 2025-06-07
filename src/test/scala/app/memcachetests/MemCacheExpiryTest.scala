@@ -16,7 +16,7 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
       val key = "expiredKey"
       val value = 42
       val expiryDuration = 100.millis // Java Duration for put
-      val sleepDuration = 200.millis // Scala Duration for IO.sleep, longer than expiry
+      val sleepDuration = 200.millis  // Scala Duration for IO.sleep, longer than expiry
 
       createCache[String, Int]().use { cache =>
         for {
@@ -85,7 +85,7 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
             // Put with initial long expiry
             _ <- cache.put(key, value1, initialExpiry)
             _ <- IO.sleep(10.millis) // Small sleep
-            get1 <- cache.get(key) // Should be there
+            get1 <- cache.get(key)   // Should be there
 
             // Overwrite with a new value and shorter expiry
             _ <- cache.put(key, 301, shortenedExpiry)
@@ -126,8 +126,8 @@ final class MemCacheExpiryTest extends AsyncFreeSpec with AsyncIOSpec with Match
         createCache[String, Int]().use { cache =>
           for {
             _ <- cache.put(key, value1) // No expiry initially
-            _ <- IO.sleep(50.millis) // Irrelevant sleep, just to show passage of time
-            get1 <- cache.get(key) // Should be there
+            _ <- IO.sleep(50.millis)    // Irrelevant sleep, just to show passage of time
+            get1 <- cache.get(key)      // Should be there
 
             // Overwrite, this time with an expiry
             _ <- cache.put(key, 501, newExpiry)

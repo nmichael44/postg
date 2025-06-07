@@ -116,7 +116,7 @@ final class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Mat
         createCacheWithCapacity[String, Int](capacity = 1).use { cache =>
           for {
             _ <- cache.put("one", 1)
-            _ <- cache.get("one") // Refresh "one"
+            _ <- cache.get("one")    // Refresh "one"
             _ <- cache.put("two", 2) // "one" should still be evicted as get doesn't change capacity logic, only LRU order
             getOneAfterEvict <- cache.get("one")
             getTwo <- cache.get("two")

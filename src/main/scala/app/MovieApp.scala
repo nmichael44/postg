@@ -8,6 +8,7 @@ import cats.Applicative
 
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
+
 import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
 import app.HttpWorker.CacheStatus
@@ -292,8 +293,10 @@ object MovieApp:
       FetchSystemUserByUserId(userIdStr),
       { case FetchSystemUserByUserIdResult(res) =>
         res match {
-          case Left(FetchSystemUserError.NotFound) => WebServiceResult.NotFoundRes(s"The given userId '$userIdStr' was not found.")
-          case Left(FetchSystemUserError.BadInput) => WebServiceResult.BadRequestRes(s"The given userId '$userIdStr' was not a valid integer.")
+          case Left(FetchSystemUserError.NotFound) =>
+            WebServiceResult.NotFoundRes(s"The given userId '$userIdStr' was not found.")
+          case Left(FetchSystemUserError.BadInput) =>
+            WebServiceResult.BadRequestRes(s"The given userId '$userIdStr' was not a valid integer.")
           case Right(r) => WebServiceResult.OkJsonRes(r.asJson)
         }
       },
