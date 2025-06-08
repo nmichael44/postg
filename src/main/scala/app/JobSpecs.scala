@@ -1,5 +1,6 @@
 package app
 
+import app.MovieDbModel.UserDetails
 import io.circe.Json
 
 object JobSpecs:
@@ -19,6 +20,7 @@ object JobSpecs:
     case CreateSystemUser(loginName: String, password: String) extends JobKind("CreateSystemUser")
     case FetchSystemUserByLoginName(loginName: String) extends JobKind("FetchSystemUserByLoginName")
     case FetchSystemUserByUserId(userIdStr: String) extends JobKind("FetchSystemUserByUserId")
+    case LoginRequest(userDetails: UserDetails) extends JobKind("LoginRequest")
 
   enum FetchSystemUserError:
     case NotFound
@@ -39,3 +41,4 @@ object JobSpecs:
     case CreateSystemUserResult(userId: Int)
     case FetchSystemUserByLoginNameResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsWithId])
     case FetchSystemUserByUserIdResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsWithId])
+    case LoginRequestResult(jsonToken: Json)

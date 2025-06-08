@@ -220,6 +220,13 @@ object HttpWorker:
         }
       } yield JobResult.FetchSystemUserByUserIdResult(res)
 
+    private def processLoginRequest(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.LoginRequest]
+      val ud = j.userDetails
+      val (loginName, password) = (ud.loginName, ud.password)
+
+      ???
+
     private val JobHandlersMap: Map[Class[? <: JobKind], JobKind => F[JobResult]] = Map(
       classOf[JobKind.GetDirectorsDetailsByName]  -> getDirectorsDetailsByName,
       classOf[JobKind.GetDirectorDetails]         -> getDirectorDetails,
@@ -235,6 +242,7 @@ object HttpWorker:
       classOf[JobKind.CreateSystemUser]           -> createSystemUser,
       classOf[JobKind.FetchSystemUserByLoginName] -> fetchSystemUserByLoginName,
       classOf[JobKind.FetchSystemUserByUserId]    -> fetchSystemUserByUserId,
+      classOf[JobKind.LoginRequest]               -> processLoginRequest,
     )
 
     private def misingJobImplementationException(job: JobKind): Exception =

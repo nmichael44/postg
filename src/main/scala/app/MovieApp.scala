@@ -13,8 +13,8 @@ import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, Mo
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
 import app.HttpWorker.CacheStatus
 import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
-import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchCompanyData, FetchJsonObject, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, ReadTwoFilesInParallel}
-import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, FileContentResult, JsonObjectResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
+import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchCompanyData, FetchJsonObject, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest, ReadTwoFilesInParallel}
+import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, FileContentResult, JsonObjectResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
@@ -302,9 +302,21 @@ object MovieApp:
       },
     )
 
+  def processLoginRequest[F[_]: { Async, Logger }](req: Request[F], serverState: ServerState[F]): F[WebServiceResult] =
+    req.as[MovieDbModel.UserDetails] >>= { userDetails =>
+      jobHandler[F, LoginRequestResult](
+        "Processing login request.",
+        serverState,
+        LoginRequest(userDetails),
+        lrr => WebServiceResult.OkJsonRes(lrr.jsonToken),
+      )
+    }
+
   private def routesDefinition[F[_]: { Async, Logger }](
       serverState: ServerState[F],
   ): PartialFunction[Request[F], F[WebServiceResult]] =
+    case req @ POST -> Root / "login" =>
+      processLoginRequest(req, serverState)
     case req @ GET -> Root / "getDirectorsByName" :? firstNameOptionalQueryParamDecoderMatcher(
           firstName,
         ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>

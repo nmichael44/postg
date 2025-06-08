@@ -66,17 +66,28 @@ object AppConfig:
     def getActorMemCacheConfig: ActorMemCacheConfig = actorMemCacheConfig
     def getMovieMemCacheConfig: MovieMemCacheConfig = movieMemCacheConfig
 
+  final case class AuthConfig(
+      private val secretKey: String,
+      private val expirationPeriodInSeconds: Long,
+      private val jwtEncodingAlgorithm: String,
+  ):
+    def getSecretKey: String = secretKey
+    def getExpirationPeriodInSecond: Long = expirationPeriodInSeconds
+    def getJwtEncodingAlgorithm: String = jwtEncodingAlgorithm
+
   final case class AppConfig(
       private val name: String,
       private val dbConnectionConfig: DbConnectionConfig,
       private val serverConnectionConfig: ServerConnectionConfig,
       private val backendServerConfig: BackendServerConfig,
       private val memCacheConfig: MemCacheConfig,
+      private val authConfig: AuthConfig,
   ) derives ConfigReader:
     def getDbConnectionConfig: DbConnectionConfig = dbConnectionConfig
     def getServerConnectionConfig: ServerConnectionConfig = serverConnectionConfig
     def getBackendServerConfig: BackendServerConfig = backendServerConfig
     def getMemCacheConfig: MemCacheConfig = memCacheConfig
+    def getAuthConfig: AuthConfig = authConfig
 
   final case class Port(port: Int) extends AnyVal
 

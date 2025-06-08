@@ -20,3 +20,9 @@ object ImplicitConversions:
     inline def whenA(fa: F[A]): F[Unit] =
       import cats.syntax.all.*
       fa.whenA(b)(using app)
+
+  extension (obj: Any)
+    inline def safeAs[C]: Option[C] = obj match {
+      case c: C => Some(c)
+      case _ => None
+    }
