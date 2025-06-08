@@ -41,7 +41,7 @@ final class PersistentTreeBidiMap[K: Ordering, V: Ordering] private (
   def keySetRight: TreeSet[V] = m1.keySet
 
 object PersistentTreeBidiMap:
-  def empty[K: Ordering, V: Ordering] =
+  def empty[K: Ordering, V: Ordering]: PersistentTreeBidiMap[K, V] =
     PersistentTreeBidiMap[K, V](TreeMap.empty, TreeMap.empty)
 
   def from[K: Ordering, V: Ordering](it: IterableOnce[(K, V)]): PersistentTreeBidiMap[K, V] =
