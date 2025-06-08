@@ -33,9 +33,9 @@ object Switches:
   private val DispatchMap: Map[Class[?], (instr: Any) => Int] = Map(
     classOf[A0.type] -> (i => 0),
     classOf[A1.type] -> (i => 1),
-    classOf[A2] -> (i => i.asInstanceOf[A2].n),
-    classOf[A3] -> (i => { val a3 = asInstanceOf[A3]; a3.n + a3.m }),
-    classOf[A4] -> (i => i.asInstanceOf[A4].s.length),
+    classOf[A2]      -> (i => i.asInstanceOf[A2].n),
+    classOf[A3]      -> (i => { val a3 = asInstanceOf[A3]; a3.n + a3.m }),
+    classOf[A4]      -> (i => i.asInstanceOf[A4].s.length),
   )
 
   def eval2(i: Instr): Int =

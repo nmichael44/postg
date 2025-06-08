@@ -68,10 +68,10 @@ object MovieApp:
       new Exception("MovieRepositoryService not properly overridden in test") with NoStackTrace
 
     private val resHandlerMap: Map[Class[? <: WebServiceResult], WebServiceResult => F[Response[F]]] = Map(
-      classOf[OkStringRes] -> { wsr => Ok(wsr.asInstanceOf[OkStringRes].s) },
-      classOf[OkJsonRes] -> { wsr => Ok(wsr.asInstanceOf[OkJsonRes].json) },
-      classOf[NotFoundRes] -> { wsr => NotFound(wsr.asInstanceOf[NotFoundRes].s) },
-      classOf[BadRequestRes] -> { wsr => BadRequest(wsr.asInstanceOf[BadRequestRes].e) },
+      classOf[OkStringRes]            -> { wsr => Ok(wsr.asInstanceOf[OkStringRes].s) },
+      classOf[OkJsonRes]              -> { wsr => Ok(wsr.asInstanceOf[OkJsonRes].json) },
+      classOf[NotFoundRes]            -> { wsr => NotFound(wsr.asInstanceOf[NotFoundRes].s) },
+      classOf[BadRequestRes]          -> { wsr => BadRequest(wsr.asInstanceOf[BadRequestRes].e) },
       classOf[InternalServerErrorRes] -> { _ => InternalServerError() },
     )
 

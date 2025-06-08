@@ -221,20 +221,20 @@ object HttpWorker:
       } yield JobResult.FetchSystemUserByUserIdResult(res)
 
     private val JobHandlersMap: Map[Class[? <: JobKind], JobKind => F[JobResult]] = Map(
-      classOf[JobKind.GetDirectorsDetailsByName] -> getDirectorsDetailsByName,
-      classOf[JobKind.GetDirectorDetails] -> getDirectorDetails,
-      classOf[JobKind.GetActorDetails] -> getActorDetails,
-      classOf[JobKind.GetMoviesByDirector] -> getMoviesByDirector,
-      classOf[JobKind.GetMovie] -> getMovie,
-      classOf[JobKind.GetMovieWithCounting] -> getMovieWithCounting,
-      classOf[JobKind.CreateMovie] -> createMovie,
-      classOf[JobKind.GetFileContent] -> getFileContent,
-      classOf[JobKind.ReadTwoFilesInParallel] -> readTwoFilesInParallel,
-      classOf[JobKind.FetchCompanyData] -> fetchCompanyData,
-      classOf[JobKind.FetchJsonObject] -> fetchJsonObject,
-      classOf[JobKind.CreateSystemUser] -> createSystemUser,
+      classOf[JobKind.GetDirectorsDetailsByName]  -> getDirectorsDetailsByName,
+      classOf[JobKind.GetDirectorDetails]         -> getDirectorDetails,
+      classOf[JobKind.GetActorDetails]            -> getActorDetails,
+      classOf[JobKind.GetMoviesByDirector]        -> getMoviesByDirector,
+      classOf[JobKind.GetMovie]                   -> getMovie,
+      classOf[JobKind.GetMovieWithCounting]       -> getMovieWithCounting,
+      classOf[JobKind.CreateMovie]                -> createMovie,
+      classOf[JobKind.GetFileContent]             -> getFileContent,
+      classOf[JobKind.ReadTwoFilesInParallel]     -> readTwoFilesInParallel,
+      classOf[JobKind.FetchCompanyData]           -> fetchCompanyData,
+      classOf[JobKind.FetchJsonObject]            -> fetchJsonObject,
+      classOf[JobKind.CreateSystemUser]           -> createSystemUser,
       classOf[JobKind.FetchSystemUserByLoginName] -> fetchSystemUserByLoginName,
-      classOf[JobKind.FetchSystemUserByUserId] -> fetchSystemUserByUserId,
+      classOf[JobKind.FetchSystemUserByUserId]    -> fetchSystemUserByUserId,
     )
 
     private def misingJobImplementationException(job: JobKind): Exception =
