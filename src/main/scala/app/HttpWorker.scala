@@ -1,6 +1,6 @@
 package app
 
-import cats.data.NonEmptyVector
+import cats.data.{EitherT, NonEmptyVector}
 import cats.effect.{Async, Deferred}
 import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
@@ -11,7 +11,7 @@ import scala.util.control.NoStackTrace
 import app.services.{AuthenticationService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
 import app.AppConfig.BackendServerConfig
 import app.ImplicitConversions.*
-import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
+import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult, LoginRequestError}
 import app.MovieApp.AppMemCaches
 import app.Utils as U
 import io.circe.*
@@ -194,11 +194,13 @@ object HttpWorker:
 
     private def createSystemUser(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.CreateSystemUser]
-      val (loginName, password) = (j.loginName, j.password)
+      val userDetails = j.userDetails
+      val (loginName, password) = (userDetails.loginName, userDetails.password)
 
       for {
         _ <- U.logi("Creating system user.")
-        userId <- mr.createSystemUser(loginName, password)
+        hashedPassword <- passwordHasherService.hashPassword(password)
+        userId <- mr.createSystemUser(loginName, hashedPassword)
       } yield JobResult.CreateSystemUserResult(userId)
 
     private def fetchSystemUserByLoginName(jk: JobKind): F[JobResult] =
@@ -226,7 +228,19 @@ object HttpWorker:
       val ud = j.userDetails
       val (loginName, password) = (ud.loginName, ud.password)
 
-      ???
+      val res: EitherT[F, LoginRequestError, String] = for {
+        userDetails <- EitherT.fromOptionF(
+          mr.fetchSystemUserByLoginName(loginName),
+          LoginRequestError.InvalidLoginPassword,
+        )
+        _ <- EitherT
+          .liftF(passwordHasherService.checkPassword(password, userDetails.hashedPassword))
+          .ensure(LoginRequestError.InvalidLoginPassword)(identity) // If the password was wrong.
+
+        token <- EitherT.liftF(authenticationService.createToken(userDetails, List.empty))
+      } yield token
+
+      res.value.map(JobResult.LoginRequestResult.apply)
 
     private val JobHandlersMap: Map[Class[? <: JobKind], JobKind => F[JobResult]] = Map(
       classOf[JobKind.GetDirectorsDetailsByName]  -> getDirectorsDetailsByName,

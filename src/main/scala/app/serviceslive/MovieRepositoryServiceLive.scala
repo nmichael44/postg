@@ -5,7 +5,7 @@ import cats.effect.Async
 
 import app.services.MovieRepositoryService
 import app.MovieDbModel
-import app.MovieDbModel.UserDetailsWithId
+import app.MovieDbModel.UserDetailsInDb
 import doobie.implicits.*
 import doobie.postgres.implicits.*
 import doobie.util.transactor.Transactor
@@ -93,20 +93,20 @@ private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transac
       .withUniqueGeneratedKeys[Long]("movieid")
       .transact(xa)
 
-  override def createSystemUser(loginName: String, password: String): F[Int] =
-    sql"""insert into systemUsers (loginName, hashedPassword) values($loginName, $password)""".update
+  override def createSystemUser(loginName: String, hashedPassword: String): F[Int] =
+    sql"""insert into systemUsers (loginName, hashedPassword) values($loginName, $hashedPassword)""".update
       .withUniqueGeneratedKeys[Int]("userid")
       .transact(xa)
 
-  override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsWithId]] =
+  override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsInDb]] =
     sql"""select userId, loginName, hashedPassword from systemUsers where loginName = $loginName"""
-      .query[MovieDbModel.UserDetailsWithId]
+      .query[MovieDbModel.UserDetailsInDb]
       .option
       .transact(xa)
 
-  override def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsWithId]] =
+  override def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsInDb]] =
     sql"""select userId, loginName, hashedPassword from systemUsers where userId = $userId"""
-      .query[MovieDbModel.UserDetailsWithId]
+      .query[MovieDbModel.UserDetailsInDb]
       .option
       .transact(xa)
 

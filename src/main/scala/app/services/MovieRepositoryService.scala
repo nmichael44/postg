@@ -23,8 +23,8 @@ trait MovieRepositoryService[F[_]]:
 
   def createMovie(title: String, year: Int): F[Long]
 
-  def createSystemUser(loginName: String, password: String): F[Int]
+  def createSystemUser(loginName: String, hashedPassword: String): F[Int]
 
-  def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsWithId]]
+  def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsInDb]]
 
-  def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsWithId]]
+  def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsInDb]]

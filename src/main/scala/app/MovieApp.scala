@@ -33,6 +33,7 @@ import org.http4s.dsl.io.*
 import org.http4s.dsl.Http4sDsl
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
+import org.http4s.headers.`WWW-Authenticate`
 import org.http4s.implicits.*
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
@@ -59,6 +60,7 @@ object MovieApp:
     case OkJsonRes(json: Json)
     case NotFoundRes(s: String)
     case BadRequestRes(e: String)
+    case UnauthorizedRes(e: String)
     case InternalServerErrorRes()
 
   private[app] final class Render[F[_]: Async as async](dsl: Http4sDsl[F]):
@@ -68,16 +70,25 @@ object MovieApp:
     private val NotImplemented: Exception =
       new Exception("MovieRepositoryService not properly overridden in test") with NoStackTrace
 
-    private val resHandlerMap: Map[Class[? <: WebServiceResult], WebServiceResult => F[Response[F]]] = Map(
-      classOf[OkStringRes]            -> { wsr => Ok(wsr.asInstanceOf[OkStringRes].s) },
-      classOf[OkJsonRes]              -> { wsr => Ok(wsr.asInstanceOf[OkJsonRes].json) },
-      classOf[NotFoundRes]            -> { wsr => NotFound(wsr.asInstanceOf[NotFoundRes].s) },
-      classOf[BadRequestRes]          -> { wsr => BadRequest(wsr.asInstanceOf[BadRequestRes].e) },
+    private val ErrorChallenge: Challenge = Challenge(
+      scheme = "Bearer",
+      realm = "neo_token_service", // "realm" can be a simple name for the token service
+      params = Map("error" -> "invalid_grant", "error_description" -> "Invalid username or password"),
+    )
+
+    private val ResultHandlerMap: Map[Class[? <: WebServiceResult], WebServiceResult => F[Response[F]]] = Map(
+      classOf[OkStringRes]   -> { wsr => Ok(wsr.asInstanceOf[OkStringRes].s) },
+      classOf[OkJsonRes]     -> { wsr => Ok(wsr.asInstanceOf[OkJsonRes].json) },
+      classOf[NotFoundRes]   -> { wsr => NotFound(wsr.asInstanceOf[NotFoundRes].s) },
+      classOf[BadRequestRes] -> { wsr => BadRequest(wsr.asInstanceOf[BadRequestRes].e) },
+      classOf[UnauthorizedRes] -> { wsr =>
+        Unauthorized(`WWW-Authenticate`(ErrorChallenge), wsr.asInstanceOf[UnauthorizedRes].e)
+      },
       classOf[InternalServerErrorRes] -> { _ => InternalServerError() },
     )
 
     def apply(wsr: WebServiceResult): F[Response[F]] =
-      resHandlerMap
+      ResultHandlerMap
         .get(wsr.getClass)
         .map(_(wsr))
         .getOrElse(async.raiseError(NotImplemented))
@@ -263,7 +274,7 @@ object MovieApp:
       jobHandler[F, CreateSystemUserResult](
         "Creating system user.",
         serverState,
-        CreateSystemUser(userDetails.loginName, userDetails.password),
+        CreateSystemUser(userDetails),
         csur => WebServiceResult.OkJsonRes(csur.asJson),
       )
     }
@@ -309,7 +320,12 @@ object MovieApp:
         "Processing login request.",
         serverState,
         LoginRequest(userDetails),
-        lrr => WebServiceResult.OkJsonRes(lrr.jsonToken),
+        { case LoginRequestResult(res) =>
+          res match {
+            case Left(_) => WebServiceResult.UnauthorizedRes("Invalid loginName/password specified.")
+            case Right(token) => WebServiceResult.OkJsonRes(Json.obj("token" -> token.asJson))
+          }
+        },
       )
     }
 

@@ -17,7 +17,7 @@ object JobSpecs:
     case ReadTwoFilesInParallel(fileName1: String, fileName2: String) extends JobKind("ReadTwoFilesInParallel")
     case FetchCompanyData(companyName: String) extends JobKind("FetchCompanyData")
     case FetchJsonObject() extends JobKind("FetchJsonObject")
-    case CreateSystemUser(loginName: String, password: String) extends JobKind("CreateSystemUser")
+    case CreateSystemUser(userDetails: UserDetails) extends JobKind("CreateSystemUser")
     case FetchSystemUserByLoginName(loginName: String) extends JobKind("FetchSystemUserByLoginName")
     case FetchSystemUserByUserId(userIdStr: String) extends JobKind("FetchSystemUserByUserId")
     case LoginRequest(userDetails: UserDetails) extends JobKind("LoginRequest")
@@ -25,6 +25,9 @@ object JobSpecs:
   enum FetchSystemUserError:
     case NotFound
     case BadInput
+
+  enum LoginRequestError:
+    case InvalidLoginPassword
 
   enum JobResult:
     case DirectorsDetailsByNameResult(directors: Seq[MovieDbModel.Director])
@@ -39,6 +42,6 @@ object JobSpecs:
     case CompanyDataResult(companyData: String)
     case JsonObjectResult(json: Json)
     case CreateSystemUserResult(userId: Int)
-    case FetchSystemUserByLoginNameResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsWithId])
-    case FetchSystemUserByUserIdResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsWithId])
-    case LoginRequestResult(jsonToken: Json)
+    case FetchSystemUserByLoginNameResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
+    case FetchSystemUserByUserIdResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
+    case LoginRequestResult(res: Either[LoginRequestError, String])

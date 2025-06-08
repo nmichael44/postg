@@ -8,7 +8,7 @@ import app.services.AuthenticationService
 import app.AppConfig.AuthConfig
 import app.AuthUtils.AppToken
 import app.ImplicitConversions.*
-import app.MovieDbModel.UserDetailsWithId
+import app.MovieDbModel.UserDetailsInDb
 import io.circe.*
 import io.circe.generic.auto.*
 import io.circe.parser.decode
@@ -23,7 +23,7 @@ private final class AuthenticationServiceLive[F[_]: Sync as sync] private (authC
 
   private val JwtDecodingAlgorithmList: Seq[JwtHmacAlgorithm] = Seq(JwtEncodingAlgorithm)
 
-  override def createToken(user: UserDetailsWithId, permissions: Seq[String]): F[String] =
+  override def createToken(user: UserDetailsInDb, permissions: Seq[String]): F[String] =
     sync.blocking {
       val epochSec = Instant.now(clock).getEpochSecond
 

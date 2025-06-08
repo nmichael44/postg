@@ -35,4 +35,4 @@ object MovieDbModel:
 
   final case class UserDetails(loginName: String, password: String)
 
-  final case class UserDetailsWithId(userId: Int, loginName: String, password: String)
+  final case class UserDetailsInDb(userId: Int, loginName: String, hashedPassword: String)
