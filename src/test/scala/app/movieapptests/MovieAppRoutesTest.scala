@@ -61,10 +61,12 @@ final class MovieAppRoutesTest extends AsyncFreeSpec with AsyncIOSpec with Match
           apiClient = apiClientStub,
           fileSystemService = fileSystemStub,
           serverStateUpdateService = serverUpdateStub,
+          passwordHasherService = ???,
+          authenticationService = ???,
           queue = serverState.jobQueue,
           supervisor = supervisor,
-          appMemCaches,
-          CacheStatus.CachesDisabled,
+          appMemCaches = appMemCaches,
+          cacheStatus = CacheStatus.CachesDisabled,
         ),
       )
 

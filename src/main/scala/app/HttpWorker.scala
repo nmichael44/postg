@@ -5,11 +5,10 @@ import cats.effect.{Async, Deferred}
 import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
 
-import scala.annotation.switch
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
-import app.services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
+import app.services.{AuthenticationService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
 import app.AppConfig.BackendServerConfig
 import app.ImplicitConversions.*
 import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
@@ -36,6 +35,8 @@ object HttpWorker:
       apiClient: ExternalApiClientService[F],
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
+      passwordHasherService: PasswordHasher[F],
+      authenticationService: AuthenticationService[F],
       appMemCaches: AppMemCaches[F],
       cacheStatus: CacheStatus,
   ):
@@ -284,13 +285,24 @@ object HttpWorker:
       apiClient: ExternalApiClientService[F],
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
+      passwordHasherService: PasswordHasher[F],
+      authenticationService: AuthenticationService[F],
       queue: Queue[F, HttpWorker.Job[F]],
       supervisor: Supervisor[F],
       appMemCaches: AppMemCaches[F],
       cacheStatus: CacheStatus,
   ): F[Unit] =
     val jobExecutor: JobExecutor[F] =
-      JobExecutor(mr, apiClient, fileSystemService, serverStateUpdateService, appMemCaches, cacheStatus)
+      JobExecutor(
+        mr,
+        apiClient,
+        fileSystemService,
+        serverStateUpdateService,
+        passwordHasherService,
+        authenticationService,
+        appMemCaches,
+        cacheStatus,
+      )
 
     val numberOfWorkers = backendServer.getNumberOfWorkers
     Vector

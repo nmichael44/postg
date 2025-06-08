@@ -12,6 +12,7 @@ import cats.implicits.*
 import scala.concurrent.ExecutionContext
 
 import app.AppConfig.AppConfig
+import app.AppConfig.DbConnectionConfig
 import com.zaxxer.hikari.HikariConfig
 import doobie.*
 import doobie.free.connection
@@ -22,8 +23,7 @@ import doobie.util.transactor
 object DoobieObj:
   private final val DriverName: String = "org.postgresql.Driver"
 
-  private def createTransactorResource(appConfig: AppConfig): Resource[IO, HikariTransactor[IO]] =
-    val dbConfig = appConfig.getDbConnectionConfig
+  private def createTransactorResource(dbConfig: DbConnectionConfig): Resource[IO, HikariTransactor[IO]] =
     val (host, port) = (dbConfig.getHost, dbConfig.getPort)
 
     val databaseURL = s"jdbc:postgresql://$host:$port/postgres"
@@ -44,8 +44,8 @@ object DoobieObj:
 
     HikariTransactor.fromHikariConfig[IO](hikariConfig)
 
-  def xaResource(appConfig: AppConfig): Resource[IO, HikariTransactor[IO]] =
-    createTransactorResource(appConfig)
+  def xaResource(dbConfig: DbConnectionConfig): Resource[IO, HikariTransactor[IO]] =
+    createTransactorResource(dbConfig)
 
   // A transactor that gets connections from java.sql.DriverManager and executes blocking operations
   // on our synchronous EC. See the chapter on connection handling for more info.

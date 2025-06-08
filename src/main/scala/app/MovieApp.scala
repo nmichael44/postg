@@ -6,10 +6,11 @@ import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
 import cats.Applicative
 
+import java.time.Clock
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
-import app.serviceslive.{ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
+import app.serviceslive.{AuthenticationServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
 import app.HttpWorker.CacheStatus
 import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
@@ -36,7 +37,7 @@ import org.http4s.implicits.*
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.log4cats.Logger
 import pureconfig.ConfigSource
-import services.{ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
+import services.{AuthenticationService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
 
 object MovieApp:
   private[app] final case class LiveServerState[F[_]](
@@ -496,7 +497,7 @@ object MovieApp:
         serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
         supervisor <- Supervisor[F](await = false)
-        xa <- DoobieObj.xaResource(appConfig)
+        xa <- DoobieObj.xaResource(appConfig.getDbConnectionConfig)
       } yield (appConfig, serverState, httpClient, supervisor, xa, appMemCaches)
 
       coreResources.use { (appConfig, serverState, httpClient, supervisor, xa, appMemCaches) =>
@@ -507,6 +508,10 @@ object MovieApp:
         val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create
         val serverStateUpdateService: ServerStateUpdateService[F] =
           ServerStateUpdateServiceLive.create(serverState)
+        val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create
+
+        val clock: Clock = Clock.systemUTC()
+        val authenticationService: AuthenticationService[F] = AuthenticationServiceLive.create(appConfig.getAuthConfig, clock)
 
         HttpWorker.startWorkers(
           appConfig.getBackendServerConfig,
@@ -514,6 +519,8 @@ object MovieApp:
           externalApiClientService,
           fileSystemService,
           serverStateUpdateService,
+          passwordHasherService,
+          authenticationService,
           serverState.jobQueue,
           supervisor,
           appMemCaches,
