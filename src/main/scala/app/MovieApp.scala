@@ -1,5 +1,6 @@
 package app
 
+import cats.data.{EitherT, Kleisli, OptionT}
 import cats.effect.*
 import cats.effect.kernel.{Async, Resource}
 import cats.effect.std.{Queue, Supervisor}
@@ -10,7 +11,7 @@ import java.time.Clock
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
-import app.serviceslive.{AuthenticationServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
+import app.serviceslive.{AuthServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
 import app.HttpWorker.CacheStatus
 import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
@@ -33,12 +34,14 @@ import org.http4s.dsl.io.*
 import org.http4s.dsl.Http4sDsl
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.headers.`WWW-Authenticate`
+import org.http4s.headers.{`WWW-Authenticate`, Authorization}
 import org.http4s.implicits.*
+import org.http4s.server.{AuthMiddleware, Router}
 import org.typelevel.log4cats.{Logger, LoggerName}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
-import services.{AuthenticationService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
+import services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
+import AuthUtils.AuthenticatedUser
 
 object MovieApp:
   private[app] final case class LiveServerState[F[_]](
@@ -124,11 +127,11 @@ object MovieApp:
     resEither.fold(_ => WebServiceResult.InternalServerErrorRes(), jr => f(jr.asInstanceOf[T]))
 
   private def getDirectorsDetailsByName[F[_]: { Async, Logger as logger }](
-      req: Request[F],
+      ctxReq: ContextRequest[F, AuthenticatedUser],
       serverState: ServerState[F],
       directorPath: DirectorPath,
   ): F[WebServiceResult] =
-    ensureOnlyAllowedParams(allowedParamsForGetDirectors, req)
+    ensureOnlyAllowedParams(allowedParamsForGetDirectors, ctxReq)
       .getOrElse {
         jobHandler[F, DirectorsDetailsByNameResult](
           "Fetching directors details by name.",
@@ -269,7 +272,10 @@ object MovieApp:
   private given [F[_]: Async]: EntityDecoder[F, MovieDbModel.UserDetails] =
     jsonOf[F, MovieDbModel.UserDetails]
 
-  def createSystemUser[F[_]: { Async, Logger }](req: Request[F], serverState: ServerState[F]): F[WebServiceResult] =
+  def createSystemUser[F[_]: { Async, Logger }](
+      req: Request[F],
+      serverState: ServerState[F],
+  ): F[WebServiceResult] =
     req.as[MovieDbModel.UserDetails] >>= { userDetails =>
       jobHandler[F, CreateSystemUserResult](
         "Creating system user.",
@@ -278,6 +284,12 @@ object MovieApp:
         csur => WebServiceResult.OkJsonRes(csur.asJson),
       )
     }
+
+  def createSystemUser[F[_]: { Async, Logger }](
+      ctxReq: ContextRequest[F, AuthenticatedUser],
+      serverState: ServerState[F],
+  ): F[WebServiceResult] =
+    createSystemUser(ctxReq.req, serverState)
 
   def fetchSystemUserByLoginName[F[_]: { Async, Logger }](
       loginName: String,
@@ -329,60 +341,93 @@ object MovieApp:
       )
     }
 
-  private def routesDefinition[F[_]: { Async, Logger }](
-      serverState: ServerState[F],
-  ): PartialFunction[Request[F], F[WebServiceResult]] =
+  private def authMiddleware[F[_]: Async](
+      authService: AuthService[F],
+      dsl: Http4sDsl[F],
+  ): AuthMiddleware[F, AuthenticatedUser] =
+    import dsl.*
+
+    val authUser: Kleisli[F, Request[F], Either[String, AuthenticatedUser]] = Kleisli { request =>
+      val eitherToken: Either[String, String] =
+        request.headers.get[Authorization] match {
+          case Some(Authorization(Credentials.Token(AuthScheme.Bearer, token))) => Right(token)
+          case _ => Left("Bearer token in Authorization header not found.")
+        }
+
+      (for {
+        tokenStr <- EitherT.fromEither(eitherToken)
+        token <- EitherT(authService.validateToken(tokenStr).map(_.left.map(_.getMessage)))
+      } yield AuthenticatedUser.create(token)).value
+    }
+
+    val onFailure: AuthedRoutes[String, F] = Kleisli.liftF(OptionT.liftF(Forbidden("Invalid token!")))
+
+    AuthMiddleware(authUser, onFailure)
+
+  private type PF[T, R] = PartialFunction[T, R]
+  private type ReqToWsr[F[_]] = PF[Request[F], F[WebServiceResult]]
+  private type CtxReqToWsr[F[_]] = PF[ContextRequest[F, AuthenticatedUser], F[WebServiceResult]]
+
+  private def publicRoutes[F[_]: { Async, Logger }](serverState: ServerState[F]): ReqToWsr[F] =
     case req @ POST -> Root / "login" =>
       processLoginRequest(req, serverState)
-    case req @ GET -> Root / "getDirectorsByName" :?
+    // This should be removed after we are done testing.
+    case req @ POST -> Root / "createSystemUser" =>
+      createSystemUser(req, serverState)
+
+  private def authedRoutes[F[_]: { Async, Logger }](serverState: ServerState[F]): CtxReqToWsr[F] =
+    case ctxReq @ GET -> Root / "getDirectorsByName" :?
         firstNameOptionalQueryParamDecoderMatcher(firstName) +&
-        lastNameOptionalQueryParamDecoderMatcher(lastName) =>
-      getDirectorsDetailsByName(req, serverState, DirectorPath(firstName, lastName))
-    case GET -> Root / "getDirector" / LongVar(directorId) =>
+        lastNameOptionalQueryParamDecoderMatcher(lastName) as _ =>
+      getDirectorsDetailsByName(ctxReq, serverState, DirectorPath(firstName, lastName))
+    case GET -> Root / "getDirector" / LongVar(directorId) as _ =>
       getDirectorDetails(serverState, directorId)
-    case GET -> Root / "getActor" / LongVar(actorId) =>
+    case GET -> Root / "getActor" / LongVar(actorId) as _ =>
       getActorDetails(serverState, actorId)
-    case GET -> Root / "getMoviesByDirector" / LongVar(directorId) =>
+    case GET -> Root / "getMoviesByDirector" / LongVar(directorId) as _ =>
       getMoviesByDirector(serverState, directorId)
-    case GET -> Root / "getMovie" / LongVar(movieId) =>
+    case GET -> Root / "getMovie" / LongVar(movieId) as _ =>
       getMovie(serverState, movieId)
-    case GET -> Root / "getMovieWithCounting" / LongVar(movieId) =>
+    case GET -> Root / "getMovieWithCounting" / LongVar(movieId) as _ =>
       getMovieWithCounting(movieId, serverState)
     case POST -> Root / "createMovie" :?
         titleQueryParamDecoderMatcher(title) +&
-        yearQueryParamDecoderMatcher(year) =>
+        yearQueryParamDecoderMatcher(year) as _ =>
       createMovie(title, year, serverState)
-    case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
+    case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) as _ =>
       getFileContent(fileName, serverState)
     case GET -> Root / "readTwoFilesInParallel" :?
         fileName1QueryParamDecoderMatcher(fileName1) +&
-        fileName2QueryParamDecoderMatcher(fileName2) =>
+        fileName2QueryParamDecoderMatcher(fileName2) as _ =>
       readTwoFilesInParallel(fileName1, fileName2, serverState)
-    case GET -> Root / "fetchCompanyData" / companyName =>
+    case GET -> Root / "fetchCompanyData" / companyName as _ =>
       fetchCompanyData(companyName, serverState)
-    case GET -> Root / "getJsonObject" =>
+    case GET -> Root / "getJsonObject" as _ =>
       fetchJasonObject(serverState)
-    case req @ POST -> Root / "createSystemUser" =>
-      createSystemUser(req, serverState)
-    case GET -> Root / "fetchSystemUserByLoginName" / loginName =>
+    case ctxReq @ POST -> Root / "createSystemUser" as _ =>
+      createSystemUser(ctxReq, serverState)
+    case GET -> Root / "fetchSystemUserByLoginName" / loginName as _ =>
       fetchSystemUserByLoginName(loginName, serverState)
-    case GET -> Root / "fetchSystemUserByUserId" / userIdStr =>
+    case GET -> Root / "fetchSystemUserByUserId" / userIdStr as _ =>
       fetchSystemUserByUserId(userIdStr, serverState)
 
-  private def routes[F[_]: { Async, Logger }](
+  private def allRoutes[F[_]: { Async, Logger }](
       serverState: ServerState[F],
+      authService: AuthService[F],
+      dsl: Http4sDsl[F],
       render: Render[F],
-  ): PartialFunction[Request[F], F[Response[F]]] =
-    routesDefinition(serverState).andThen(_ >>= render.apply)
-
-  private[app] def allRoutesComplete[F[_]: { Async, Logger }](serverState: ServerState[F], render: Render[F]): HttpApp[F] =
-    HttpRoutes.of[F](routes[F](serverState, render)).orNotFound
+  ): HttpApp[F] = Router[F](
+    "/" -> HttpRoutes.of[F](publicRoutes(serverState).andThen(_ >>= render.apply)),
+    "/api" -> authMiddleware(authService, dsl)(
+      AuthedRoutes.of[AuthenticatedUser, F](authedRoutes(serverState).andThen(_ >>= render.apply)),
+    ),
+  ).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: Applicative as app](
       allowedParams: Set[String],
-      req: Request[F],
+      ctxReq: ContextRequest[F, AuthenticatedUser],
   ): Option[F[WebServiceResult]] =
-    val providedParams = req.multiParams.keySet
+    val providedParams = ctxReq.req.multiParams.keySet
     val extraParams = providedParams -- allowedParams
 
     Option.when(extraParams.nonEmpty)(
@@ -461,10 +506,6 @@ object MovieApp:
       ),
     )
 
-  // This is the number of redirects Ember will perform when a response
-  // specifies that a redirection.
-  inline private val MaxRedirects = 5
-
   private def createServerResource[F[_]: { Async, Network, Logger }](
       serverHostIP: Ipv4Address,
       serverHostPort: Port,
@@ -491,26 +532,35 @@ object MovieApp:
       ),
     ]
 
-  private def runHttpApp[F[_]: { Async, Network, Logger }](serverState: ServerState[F], appConfig: AppConfig): F[ExitCode] =
-    val render: Render[F] = Render(Http4sDsl[F])
+  private def runHttpApp[F[_]: { Async, Network, Logger }](
+      serverState: ServerState[F],
+      authService: AuthService[F],
+      appConfig: AppConfig,
+  ): F[ExitCode] =
+    val dsl: Http4sDsl[F] = Http4sDsl[F]
+    val render: Render[F] = Render(dsl)
     val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
-    val httpApp: HttpApp[F] = allRoutesComplete[F](serverState, render)
+    val httpApp: HttpApp[F] = allRoutes[F](serverState, authService, dsl, render)
 
     createServerResource(serverHostIP, serverHostPort, httpApp)
       .use(server => U.logi(s"Server started with base uri: '${server.baseUri.toString}'.") *> Async[F].never)
       .as(ExitCode.Success)
 
-  private val MovieAppLoggerName: LoggerName = LoggerName("MovieAppLogger")
+  // This is the number of redirects Ember will perform when a response
+  // specifies that it needs a redirection.
+  inline private val MaxHttpClientRedirects = 5
+
+  private implicit val MovieAppLoggerName: LoggerName = LoggerName("MovieAppLogger")
 
   def run: IO[ExitCode] =
     type F = IO
 
-    Slf4jLogger.create(using Async[F], MovieAppLoggerName) >>= { implicit logger =>
+    Slf4jLogger.create[F] >>= { implicit logger =>
       val coreResources: CoreResources[F] = for {
         appConfig <- createConfigResource[F]()
         appMemCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
         serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
-        httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
+        httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxHttpClientRedirects))
         supervisor <- Supervisor[F](await = false)
         xa <- DoobieObj.xaResource[F](appConfig.getDbConnectionConfig)
       } yield (appConfig, serverState, httpClient, supervisor, xa, appMemCaches)
@@ -526,8 +576,8 @@ object MovieApp:
         val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create[F]
 
         val clock: Clock = Clock.systemUTC()
-        val authenticationService: AuthenticationService[F] =
-          AuthenticationServiceLive.create[F](appConfig.getAuthConfig, clock)
+        val authService: AuthService[F] =
+          AuthServiceLive.create[F](appConfig.getAuthConfig, clock)
 
         HttpWorker.startWorkers[F](
           appConfig.getBackendServerConfig,
@@ -536,11 +586,11 @@ object MovieApp:
           fileSystemService,
           serverStateUpdateService,
           passwordHasherService,
-          authenticationService,
+          authService,
           serverState.jobQueue,
           supervisor,
           appMemCaches,
           CacheStatus.CachesEnabled,
-        ) *> runHttpApp[F](serverState, appConfig)
+        ) *> runHttpApp[F](serverState, authService, appConfig)
       }
     }

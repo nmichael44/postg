@@ -4,7 +4,7 @@ import cats.effect.Sync
 
 import java.time.{Clock, Instant}
 
-import app.services.AuthenticationService
+import app.services.AuthService
 import app.AppConfig.AuthConfig
 import app.AuthUtils.AppToken
 import app.ImplicitConversions.*
@@ -16,12 +16,13 @@ import io.circe.syntax.*
 import pdi.jwt.{JwtAlgorithm, JwtCirce}
 import pdi.jwt.algorithms.JwtHmacAlgorithm
 
-private final class AuthenticationServiceLive[F[_]: Sync as sync] private (authConfig: AuthConfig, clock: Clock)
-    extends AuthenticationService[F]:
+private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: AuthConfig, clock: Clock) extends AuthService[F]:
   private val JwtEncodingAlgorithm: JwtHmacAlgorithm =
-    AuthenticationServiceLive.getHmacAlgorithm(authConfig)
+    AuthServiceLive.getHmacAlgorithm(authConfig)
 
   private val JwtDecodingAlgorithmList: Seq[JwtHmacAlgorithm] = Seq(JwtEncodingAlgorithm)
+
+  final case class MyClaim(iss: String, sub: Int, iat: Long, exp: Long, permissions: Seq[String])
 
   override def createToken(user: UserDetailsInDb, permissions: Seq[String]): F[String] =
     sync.blocking {
@@ -29,7 +30,7 @@ private final class AuthenticationServiceLive[F[_]: Sync as sync] private (authC
 
       val claim = Json.obj(
         "iss"         -> "neo-app".asJson,
-        "sub"         -> user.userId.asJson,
+        "sub"         -> user.userId.toString.asJson,
         "iat"         -> epochSec.asJson,
         "exp"         -> (epochSec + authConfig.getExpirationPeriodInSecond).asJson,
         "permissions" -> permissions.asJson,
@@ -41,14 +42,18 @@ private final class AuthenticationServiceLive[F[_]: Sync as sync] private (authC
   override def validateToken(token: String): F[Either[Throwable, AppToken]] =
     sync.blocking {
       for {
-        claim <- JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither
-        appToken <- decode[AppToken](claim.content)
-      } yield appToken
+        jwtClaim <- JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither
+        permissions <- decode[Map[String, Seq[String]]](jwtClaim.content)
+      } yield AppToken(
+        java.lang.Long.parseLong(jwtClaim.subject.get),
+        permissions.getOrElse("permissions", throw AssertionError("Bad decoding")),
+        jwtClaim.expiration.get,
+      )
     }
 
-object AuthenticationServiceLive:
-  def create[F[_]: Sync](authConfig: AuthConfig, clock: Clock): AuthenticationService[F] =
-    AuthenticationServiceLive[F](authConfig, clock)
+object AuthServiceLive:
+  def create[F[_]: Sync](authConfig: AuthConfig, clock: Clock): AuthService[F] =
+    AuthServiceLive[F](authConfig, clock)
 
   private def getHmacAlgorithm(authConfig: AuthConfig): JwtHmacAlgorithm =
     JwtAlgorithm

@@ -8,7 +8,7 @@ import cats.syntax.all.*
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
-import app.services.{AuthenticationService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
+import app.services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
 import app.AppConfig.BackendServerConfig
 import app.ImplicitConversions.*
 import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult, LoginRequestError}
@@ -36,7 +36,7 @@ object HttpWorker:
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
       passwordHasherService: PasswordHasher[F],
-      authenticationService: AuthenticationService[F],
+      authService: AuthService[F],
       appMemCaches: AppMemCaches[F],
       cacheStatus: CacheStatus,
   ):
@@ -237,7 +237,7 @@ object HttpWorker:
           .liftF(passwordHasherService.checkPassword(password, userDetails.hashedPassword))
           .ensure(LoginRequestError.InvalidLoginPassword)(identity) // If the password was wrong.
 
-        token <- EitherT.liftF(authenticationService.createToken(userDetails, List.empty))
+        token <- EitherT.liftF(authService.createToken(userDetails, List.empty))
       } yield token
 
       res.value.map(JobResult.LoginRequestResult.apply)
@@ -300,7 +300,7 @@ object HttpWorker:
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
       passwordHasherService: PasswordHasher[F],
-      authenticationService: AuthenticationService[F],
+      authService: AuthService[F],
       queue: Queue[F, HttpWorker.Job[F]],
       supervisor: Supervisor[F],
       appMemCaches: AppMemCaches[F],
@@ -313,7 +313,7 @@ object HttpWorker:
         fileSystemService,
         serverStateUpdateService,
         passwordHasherService,
-        authenticationService,
+        authService,
         appMemCaches,
         cacheStatus,
       )
