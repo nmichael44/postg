@@ -72,7 +72,7 @@ object MovieApp:
 
     private val ErrorChallenge: Challenge = Challenge(
       scheme = "Bearer",
-      realm = "neo_token_service", // "realm" can be a simple name for the token service
+      realm = "neo_token_service",
       params = Map("error" -> "invalid_grant", "error_description" -> "Invalid username or password"),
     )
 
