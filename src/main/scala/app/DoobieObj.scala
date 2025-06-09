@@ -23,7 +23,7 @@ import doobie.util.transactor
 object DoobieObj:
   private final val DriverName: String = "org.postgresql.Driver"
 
-  private def createTransactorResource(dbConfig: DbConnectionConfig): Resource[IO, HikariTransactor[IO]] =
+  private def createTransactorResource[F[_]: Async](dbConfig: DbConnectionConfig): Resource[F, HikariTransactor[F]] =
     val (host, port) = (dbConfig.getHost, dbConfig.getPort)
 
     val databaseURL = s"jdbc:postgresql://$host:$port/postgres"
@@ -42,10 +42,10 @@ object DoobieObj:
     hikariConfig.setMaximumPoolSize(maxConnections)
     hikariConfig.setMinimumIdle(minIdleConnections)
 
-    HikariTransactor.fromHikariConfig[IO](hikariConfig)
+    HikariTransactor.fromHikariConfig[F](hikariConfig)
 
-  def xaResource(dbConfig: DbConnectionConfig): Resource[IO, HikariTransactor[IO]] =
-    createTransactorResource(dbConfig)
+  def xaResource[F[_]: Async](dbConfig: DbConnectionConfig): Resource[F, HikariTransactor[F]] =
+    createTransactorResource[F](dbConfig)
 
   // A transactor that gets connections from java.sql.DriverManager and executes blocking operations
   // on our synchronous EC. See the chapter on connection handling for more info.

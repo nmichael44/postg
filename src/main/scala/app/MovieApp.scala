@@ -35,8 +35,8 @@ import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.headers.`WWW-Authenticate`
 import org.http4s.implicits.*
+import org.typelevel.log4cats.{Logger, LoggerName}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import org.typelevel.log4cats.Logger
 import pureconfig.ConfigSource
 import services.{AuthenticationService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
 
@@ -334,14 +334,10 @@ object MovieApp:
   ): PartialFunction[Request[F], F[WebServiceResult]] =
     case req @ POST -> Root / "login" =>
       processLoginRequest(req, serverState)
-    case req @ GET -> Root / "getDirectorsByName" :? firstNameOptionalQueryParamDecoderMatcher(
-          firstName,
-        ) +& lastNameOptionalQueryParamDecoderMatcher(lastName) =>
-      getDirectorsDetailsByName(
-        req,
-        serverState,
-        DirectorPath(firstName, lastName),
-      )
+    case req @ GET -> Root / "getDirectorsByName" :?
+        firstNameOptionalQueryParamDecoderMatcher(firstName) +&
+        lastNameOptionalQueryParamDecoderMatcher(lastName) =>
+      getDirectorsDetailsByName(req, serverState, DirectorPath(firstName, lastName))
     case GET -> Root / "getDirector" / LongVar(directorId) =>
       getDirectorDetails(serverState, directorId)
     case GET -> Root / "getActor" / LongVar(actorId) =>
@@ -352,15 +348,15 @@ object MovieApp:
       getMovie(serverState, movieId)
     case GET -> Root / "getMovieWithCounting" / LongVar(movieId) =>
       getMovieWithCounting(movieId, serverState)
-    case POST -> Root / "createMovie" :? titleQueryParamDecoderMatcher(
-          title,
-        ) +& yearQueryParamDecoderMatcher(year) =>
+    case POST -> Root / "createMovie" :?
+        titleQueryParamDecoderMatcher(title) +&
+        yearQueryParamDecoderMatcher(year) =>
       createMovie(title, year, serverState)
     case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) =>
       getFileContent(fileName, serverState)
-    case GET -> Root / "readTwoFilesInParallel" :? fileName1QueryParamDecoderMatcher(
-          fileName1,
-        ) +& fileName2QueryParamDecoderMatcher(fileName2) =>
+    case GET -> Root / "readTwoFilesInParallel" :?
+        fileName1QueryParamDecoderMatcher(fileName1) +&
+        fileName2QueryParamDecoderMatcher(fileName2) =>
       readTwoFilesInParallel(fileName1, fileName2, serverState)
     case GET -> Root / "fetchCompanyData" / companyName =>
       fetchCompanyData(companyName, serverState)
@@ -388,6 +384,7 @@ object MovieApp:
   ): Option[F[WebServiceResult]] =
     val providedParams = req.multiParams.keySet
     val extraParams = providedParams -- allowedParams
+
     Option.when(extraParams.nonEmpty)(
       app.pure(
         WebServiceResult.BadRequestRes(
@@ -503,33 +500,36 @@ object MovieApp:
       .use(server => U.logi(s"Server started with base uri: '${server.baseUri.toString}'.") *> Async[F].never)
       .as(ExitCode.Success)
 
+  private val MovieAppLoggerName: LoggerName = LoggerName("MovieAppLogger")
+
   def run: IO[ExitCode] =
     type F = IO
 
-    Slf4jLogger.create[F] >>= { implicit logger =>
+    Slf4jLogger.create(using Async[F], MovieAppLoggerName) >>= { implicit logger =>
       val coreResources: CoreResources[F] = for {
         appConfig <- createConfigResource[F]()
         appMemCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
         serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxRedirects))
         supervisor <- Supervisor[F](await = false)
-        xa <- DoobieObj.xaResource(appConfig.getDbConnectionConfig)
+        xa <- DoobieObj.xaResource[F](appConfig.getDbConnectionConfig)
       } yield (appConfig, serverState, httpClient, supervisor, xa, appMemCaches)
 
       coreResources.use { (appConfig, serverState, httpClient, supervisor, xa, appMemCaches) =>
         val externalApiClientService: ExternalApiClientService[F] =
           ExternalApiClientServiceLive.create[F](httpClient)
         val movieRepositoryService: MovieRepositoryService[F] =
-          MovieRepositoryServiceLive.create(xa)
-        val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create
+          MovieRepositoryServiceLive.create[F](xa)
+        val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create[F]
         val serverStateUpdateService: ServerStateUpdateService[F] =
-          ServerStateUpdateServiceLive.create(serverState)
-        val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create
+          ServerStateUpdateServiceLive.create[F](serverState)
+        val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create[F]
 
         val clock: Clock = Clock.systemUTC()
-        val authenticationService: AuthenticationService[F] = AuthenticationServiceLive.create(appConfig.getAuthConfig, clock)
+        val authenticationService: AuthenticationService[F] =
+          AuthenticationServiceLive.create[F](appConfig.getAuthConfig, clock)
 
-        HttpWorker.startWorkers(
+        HttpWorker.startWorkers[F](
           appConfig.getBackendServerConfig,
           movieRepositoryService,
           externalApiClientService,
@@ -541,6 +541,6 @@ object MovieApp:
           supervisor,
           appMemCaches,
           CacheStatus.CachesEnabled,
-        ) *> runHttpApp(serverState, appConfig)
+        ) *> runHttpApp[F](serverState, appConfig)
       }
     }
