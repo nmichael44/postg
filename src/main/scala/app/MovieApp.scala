@@ -13,7 +13,6 @@ import scala.util.control.NoStackTrace
 
 import app.serviceslive.{AuthServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
-import app.HttpWorker.CacheStatus
 import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchCompanyData, FetchJsonObject, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest, ReadTwoFilesInParallel}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, FileContentResult, JsonObjectResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
@@ -272,7 +271,7 @@ object MovieApp:
   private given [F[_]: Async]: EntityDecoder[F, MovieDbModel.UserDetails] =
     jsonOf[F, MovieDbModel.UserDetails]
 
-  def createSystemUser[F[_]: { Async, Logger }](
+  private def createSystemUser[F[_]: { Async, Logger }](
       req: Request[F],
       serverState: ServerState[F],
   ): F[WebServiceResult] =
@@ -285,7 +284,7 @@ object MovieApp:
       )
     }
 
-  def createSystemUser[F[_]: { Async, Logger }](
+  private def createSystemUser[F[_]: { Async, Logger }](
       ctxReq: ContextRequest[F, AuthenticatedUser],
       serverState: ServerState[F],
   ): F[WebServiceResult] =
@@ -307,7 +306,7 @@ object MovieApp:
       },
     )
 
-  def fetchSystemUserByUserId[F[_]: { Async, Logger }](
+  private def fetchSystemUserByUserId[F[_]: { Async, Logger }](
       userIdStr: String,
       serverState: ServerState[F],
   ): F[WebServiceResult] =
@@ -326,7 +325,7 @@ object MovieApp:
       },
     )
 
-  def processLoginRequest[F[_]: { Async, Logger }](req: Request[F], serverState: ServerState[F]): F[WebServiceResult] =
+  private def processLoginRequest[F[_]: { Async, Logger }](req: Request[F], serverState: ServerState[F]): F[WebServiceResult] =
     req.as[MovieDbModel.UserDetails] >>= { userDetails =>
       jobHandler[F, LoginRequestResult](
         "Processing login request.",
@@ -356,8 +355,8 @@ object MovieApp:
 
       (for {
         tokenStr <- EitherT.fromEither(eitherToken)
-        token <- EitherT(authService.validateToken(tokenStr).map(_.left.map(_.getMessage)))
-      } yield AuthenticatedUser.create(token)).value
+        authUser <- EitherT(authService.validateToken(tokenStr).map(_.left.map(_.getMessage)))
+      } yield authUser).value
     }
 
     val onFailure: AuthedRoutes[String, F] = Kleisli.liftF(OptionT.liftF(Forbidden("Invalid token!")))
@@ -411,17 +410,33 @@ object MovieApp:
     case GET -> Root / "fetchSystemUserByUserId" / userIdStr as _ =>
       fetchSystemUserByUserId(userIdStr, serverState)
 
+  private def publicRoutesPath[F[_]: { Async, Logger }](
+      serverState: ServerState[F],
+      render: Render[F],
+  ): (String, HttpRoutes[F]) =
+    "/" -> HttpRoutes.of[F](publicRoutes(serverState).andThen(_ >>= render.apply))
+
+  private def apiRoutesPath[F[_]: { Async, Logger }](
+      serverState: ServerState[F],
+      authService: AuthService[F],
+      dsl: Http4sDsl[F],
+      render: Render[F],
+  ): (String, HttpRoutes[F]) =
+    val authRoutes: AuthedRoutes[AuthenticatedUser, F] =
+      AuthedRoutes.of[AuthenticatedUser, F](authedRoutes(serverState).andThen(_ >>= render.apply))
+
+    "/api" -> authMiddleware(authService, dsl)(authRoutes)
+
   private def allRoutes[F[_]: { Async, Logger }](
       serverState: ServerState[F],
       authService: AuthService[F],
       dsl: Http4sDsl[F],
       render: Render[F],
-  ): HttpApp[F] = Router[F](
-    "/" -> HttpRoutes.of[F](publicRoutes(serverState).andThen(_ >>= render.apply)),
-    "/api" -> authMiddleware(authService, dsl)(
-      AuthedRoutes.of[AuthenticatedUser, F](authedRoutes(serverState).andThen(_ >>= render.apply)),
-    ),
-  ).orNotFound
+  ): HttpApp[F] =
+    Router[F](
+      publicRoutesPath(serverState, render),
+      apiRoutesPath(serverState, authService, dsl, render),
+    ).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: Applicative as app](
       allowedParams: Set[String],
@@ -483,16 +498,16 @@ object MovieApp:
     )
 
   final class AppMemCaches[F[_]](
-      val directorCache: MemCache[F, Long, MovieDbModel.Director],
-      val actorCache: MemCache[F, Long, MovieDbModel.Actor],
-      val movieCache: MemCache[F, Long, MovieDbModel.Movie],
+      val directorCache: (Boolean, MemCache[F, Long, MovieDbModel.Director]),
+      val actorCache: (Boolean, MemCache[F, Long, MovieDbModel.Actor]),
+      val movieCache: (Boolean, MemCache[F, Long, MovieDbModel.Movie]),
   )
 
-  private def createMemCaches[F[_]: { Temporal, Logger }](memCacheConfig: MemCacheConfig): Resource[F, AppMemCaches[F]] =
+  private def createMemCaches[F[_]: { Temporal, Logger }](mcc: MemCacheConfig): Resource[F, AppMemCaches[F]] =
     (
-      createDirectorMemCache(memCacheConfig.getDirectorMemCacheConfig),
-      createActorMemCache(memCacheConfig.getActorMemCacheConfig),
-      createMovieMemCache(memCacheConfig.getMovieMemCacheConfig),
+      createDirectorMemCache(mcc.getDirectorMemCacheConfig).tupleLeft(mcc.getDirectorMemCacheConfig.getCacheEnabled),
+      createActorMemCache(mcc.getActorMemCacheConfig).tupleLeft(mcc.getActorMemCacheConfig.getCacheEnabled),
+      createMovieMemCache(mcc.getMovieMemCacheConfig).tupleLeft(mcc.getMovieMemCacheConfig.getCacheEnabled),
     ).mapN((d, a, m) => AppMemCaches[F](d, a, m))
 
   private def createConfigResource[F[_]: { Async as async, Logger }]() =
@@ -550,10 +565,10 @@ object MovieApp:
   // specifies that it needs a redirection.
   inline private val MaxHttpClientRedirects = 5
 
-  private implicit val MovieAppLoggerName: LoggerName = LoggerName("MovieAppLogger")
-
   def run: IO[ExitCode] =
     type F = IO
+
+    implicit val MovieAppLoggerName: LoggerName = LoggerName("MovieAppLogger")
 
     Slf4jLogger.create[F] >>= { implicit logger =>
       val coreResources: CoreResources[F] = for {
@@ -566,18 +581,13 @@ object MovieApp:
       } yield (appConfig, serverState, httpClient, supervisor, xa, appMemCaches)
 
       coreResources.use { (appConfig, serverState, httpClient, supervisor, xa, appMemCaches) =>
-        val externalApiClientService: ExternalApiClientService[F] =
-          ExternalApiClientServiceLive.create[F](httpClient)
-        val movieRepositoryService: MovieRepositoryService[F] =
-          MovieRepositoryServiceLive.create[F](xa)
+        val externalApiClientService: ExternalApiClientService[F] = ExternalApiClientServiceLive.create[F](httpClient)
+        val movieRepositoryService: MovieRepositoryService[F] = MovieRepositoryServiceLive.create[F](xa)
         val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create[F]
-        val serverStateUpdateService: ServerStateUpdateService[F] =
-          ServerStateUpdateServiceLive.create[F](serverState)
+        val serverStateUpdateService: ServerStateUpdateService[F] = ServerStateUpdateServiceLive.create[F](serverState)
         val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create[F]
 
-        val clock: Clock = Clock.systemUTC()
-        val authService: AuthService[F] =
-          AuthServiceLive.create[F](appConfig.getAuthConfig, clock)
+        val authService: AuthService[F] = AuthServiceLive.create[F](appConfig.getAuthConfig, Clock.systemUTC())
 
         HttpWorker.startWorkers[F](
           appConfig.getBackendServerConfig,
@@ -590,7 +600,6 @@ object MovieApp:
           serverState.jobQueue,
           supervisor,
           appMemCaches,
-          CacheStatus.CachesEnabled,
         ) *> runHttpApp[F](serverState, authService, appConfig)
       }
     }

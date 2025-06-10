@@ -26,10 +26,6 @@ object HttpWorker:
       val deferred: Deferred[F, Either[Throwable, JobResult]],
   )
 
-  enum CacheStatus:
-    case CachesEnabled
-    case CachesDisabled
-
   private final class JobExecutor[F[_]: { Async as async, Logger }](
       mr: MovieRepositoryService[F],
       apiClient: ExternalApiClientService[F],
@@ -38,12 +34,10 @@ object HttpWorker:
       passwordHasherService: PasswordHasher[F],
       authService: AuthService[F],
       appMemCaches: AppMemCaches[F],
-      cacheStatus: CacheStatus,
   ):
-    private val cacheEnabled = cacheStatus == CacheStatus.CachesEnabled
-    private val directorMemCache: MemCache[F, Long, MovieDbModel.Director] = appMemCaches.directorCache
-    private val actorMemCache: MemCache[F, Long, MovieDbModel.Actor] = appMemCaches.actorCache
-    private val movieMemCache: MemCache[F, Long, MovieDbModel.Movie] = appMemCaches.movieCache
+    private val directorMemCache = appMemCaches.directorCache
+    private val actorMemCache = appMemCaches.actorCache
+    private val movieMemCache = appMemCaches.movieCache
 
     private def getDirectorsDetailsByName(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.GetDirectorsDetailsByName]
@@ -57,10 +51,11 @@ object HttpWorker:
         itemName: String,
         id: Long,
         cachingDuration: FiniteDuration,
-        cache: MemCache[F, Long, T],
+        cacheDetails: (Boolean, MemCache[F, Long, T]),
         f: NonEmptyVector[Long] => F[Map[Long, T]],
         toJobResult: Option[T] => JobResult,
-    ): F[JobResult] =
+    ): F[JobResult] = {
+      val (cacheEnabled, cache) = cacheDetails
       for {
         _ <- U.logi(s"Fetching $itemName details for ID: $id")
         cashedItemOpt <- if cacheEnabled then cache.get(id) else async.pure(None)
@@ -68,20 +63,22 @@ object HttpWorker:
           case Some(item) =>
             U.logi(s"$itemName details for ID: $id found in cache.").as(Some(item))
           case None =>
-            U.logi(s"$itemName details for ID: $id not found in cache. Fetching from DB.") *>
+            cacheEnabled.whenA(U.logi(s"$itemName details for ID: $id not found in cache.")) *>
+              U.logi(s"$itemName details for ID: $id Fetching from DB.") *>
               f(NonEmptyVector.one(id)) >>= { itemDetailsMap =>
               itemDetailsMap.get(id) match {
                 case Some(item) =>
-                  U.logi(s"$itemName details for ID: $id found in DB. Putting in cache.") *>
-                    (if cacheEnabled
-                     then cache.put(id, item, cachingDuration)
-                     else async.pure(())).as(Some(item))
+                  U.logi(s"$itemName details for ID: $id found in DB.") *>
+                    cacheEnabled
+                      .whenA(U.logi(s"Putting $itemName for ID: $id in cache.") *> cache.put(id, item, cachingDuration))
+                      .as(Some(item))
                 case None =>
                   U.logi(s"$itemName details for ID: $id not found in DB.").as(None)
               }
             }
         }
       } yield toJobResult(itemOpt)
+    }
 
     private val DirectorCachingDuration: FiniteDuration = 2.minutes
 
@@ -237,7 +234,7 @@ object HttpWorker:
           .liftF(passwordHasherService.checkPassword(password, userDetails.hashedPassword))
           .ensure(LoginRequestError.InvalidLoginPassword)(identity) // If the password was wrong.
 
-        token <- EitherT.liftF(authService.createToken(userDetails, List.empty))
+        token <- EitherT.liftF(authService.createToken(userDetails, List("abc", "def")))
       } yield token
 
       res.value.map(JobResult.LoginRequestResult.apply)
@@ -304,7 +301,6 @@ object HttpWorker:
       queue: Queue[F, HttpWorker.Job[F]],
       supervisor: Supervisor[F],
       appMemCaches: AppMemCaches[F],
-      cacheStatus: CacheStatus,
   ): F[Unit] =
     val jobExecutor: JobExecutor[F] =
       JobExecutor(
@@ -315,7 +311,6 @@ object HttpWorker:
         passwordHasherService,
         authService,
         appMemCaches,
-        cacheStatus,
       )
 
     val numberOfWorkers = backendServer.getNumberOfWorkers

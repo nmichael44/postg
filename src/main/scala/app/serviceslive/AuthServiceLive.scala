@@ -6,7 +6,7 @@ import java.time.{Clock, Instant}
 
 import app.services.AuthService
 import app.AppConfig.AuthConfig
-import app.AuthUtils.AppToken
+import app.AuthUtils.AuthenticatedUser
 import app.ImplicitConversions.*
 import app.MovieDbModel.UserDetailsInDb
 import io.circe.*
@@ -26,29 +26,35 @@ private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: Aut
 
   override def createToken(user: UserDetailsInDb, permissions: Seq[String]): F[String] =
     sync.blocking {
-      val epochSec = Instant.now(clock).getEpochSecond
+      val userId = user.userId
+      val nowEpochSec = Instant.now(clock).getEpochSecond
+      val expiryEpochSec = nowEpochSec + authConfig.getExpirationPeriodInSecond
+
+      val issuedAtJson = nowEpochSec.asJson
+      val expiresAtJson = expiryEpochSec.asJson
 
       val claim = Json.obj(
-        "iss"         -> "neo-app".asJson,
-        "sub"         -> user.userId.toString.asJson,
-        "iat"         -> epochSec.asJson,
-        "exp"         -> (epochSec + authConfig.getExpirationPeriodInSecond).asJson,
+        "iss" -> "neo-app".asJson,
+        "sub" -> userId.toString.asJson,
+        "iat" -> issuedAtJson,
+        "exp" -> expiresAtJson,
+        // The fields that will end up in content (see ValidateToken).
+        // We replicate some of the fields above to simply the code in validateToken().
+        "userId"      -> userId.asJson,
+        "issuedAt"    -> issuedAtJson,
+        "expiresAt"   -> expiresAtJson,
         "permissions" -> permissions.asJson,
       )
 
       JwtCirce.encode(claim, authConfig.getSecretKey, JwtEncodingAlgorithm)
     }
 
-  override def validateToken(token: String): F[Either[Throwable, AppToken]] =
+  override def validateToken(token: String): F[Either[Throwable, AuthenticatedUser]] =
     sync.blocking {
       for {
         jwtClaim <- JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither
-        permissions <- decode[Map[String, Seq[String]]](jwtClaim.content)
-      } yield AppToken(
-        java.lang.Long.parseLong(jwtClaim.subject.get),
-        permissions.getOrElse("permissions", throw AssertionError("Bad decoding")),
-        jwtClaim.expiration.get,
-      )
+        authUser <- decode[AuthenticatedUser](jwtClaim.content)
+      } yield authUser
     }
 
 object AuthServiceLive:

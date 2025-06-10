@@ -7,7 +7,6 @@ import cats.syntax.functor.*
 import scala.collection.View
 
 object ImplicitConversions:
-  // We can't make this a value class because NonEmptyVector already is one.
   extension [A](nev: NonEmptyVector[A]) {
     inline def view: View[A] = nev.toVector.view
   }
