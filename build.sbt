@@ -10,7 +10,7 @@ val circeVersion = "0.14.13"
 val scalatestVersion = "3.2.19"
 val pureConfigCoreVersion = "0.17.9"
 val catsEffectTestingScalatestVersion = "1.6.0"
-//val http4sJwtAuthVersion = "2.0.8"
+val jwtCirceVersion = "10.0.4"
 val password4jVersion = "1.8.3"
 
 lazy val root = (project in file("."))
@@ -34,8 +34,7 @@ lazy val root = (project in file("."))
       "com.github.pureconfig" %% "pureconfig-core" % pureConfigCoreVersion,
       "org.typelevel" %% "log4cats-slf4j" % log4catsSlf4jVersion,
       "ch.qos.logback" % "logback-classic" % logbackVersion % Runtime,
-      // "dev.profunktor" %% "http4s-jwt-auth" % http4sJwtAuthVersion,
-      "com.github.jwt-scala" %% "jwt-circe" % "10.0.4",
+      "com.github.jwt-scala" %% "jwt-circe" % jwtCirceVersion,
       "com.password4j" % "password4j" % password4jVersion,
       "org.typelevel" %% "cats-effect-testing-scalatest" % catsEffectTestingScalatestVersion % Test,
       "org.scalatest" %% "scalatest" % scalatestVersion % Test,
