@@ -2,18 +2,19 @@ package app
 
 import cats.effect.Sync
 
+import app.PasswordHasherLive.createArgonFunction
 import com.password4j.{Argon2Function, Password}
 import com.password4j.types.Argon2
 
 private final class PasswordHasherLive[F[_]: Sync as sync] private extends PasswordHasher[F]:
   private val argon2Function: Argon2Function =
-    Argon2Function.getInstance(
-      65536,     // memory in KiB (64MB)
-      3,         // iterations
-      1,         // parallelism
-      32,        // output hash length in bytes
-      Argon2.ID, // Argon2id
-      19,        // version 19
+    createArgonFunction(
+      memory = 65536, // In KB (64MB)
+      iterations = 3,
+      parallelism = 1,
+      outputLength = 32,
+      argon2Type = Argon2.ID,
+      version = 19,
     )
 
   inline private final val LengthOfSaltValue = 16
@@ -33,3 +34,12 @@ private final class PasswordHasherLive[F[_]: Sync as sync] private extends Passw
 object PasswordHasherLive:
   def create[F[_]: Sync]: PasswordHasher[F] =
     PasswordHasherLive[F]
+
+  private def createArgonFunction(
+      memory: Int,
+      iterations: Int,
+      parallelism: Int,
+      outputLength: Int,
+      argon2Type: Argon2,
+      version: Int,
+  ) = Argon2Function.getInstance(memory, iterations, parallelism, outputLength, argon2Type, version)
