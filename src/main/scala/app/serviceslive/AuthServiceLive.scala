@@ -1,6 +1,7 @@
 package app.serviceslive
 
 import cats.effect.Sync
+import cats.syntax.all.*
 
 import java.time.{Clock, Instant}
 
@@ -22,10 +23,8 @@ private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: Aut
 
   private val JwtDecodingAlgorithmList: Seq[JwtHmacAlgorithm] = Seq(JwtEncodingAlgorithm)
 
-  final case class MyClaim(iss: String, sub: Int, iat: Long, exp: Long, permissions: Seq[String])
-
   override def createToken(user: UserDetailsInDb, permissions: Seq[String]): F[String] =
-    sync.blocking {
+    sync.blocking:
       val userId = user.userId
       val nowEpochSec = Instant.now(clock).getEpochSecond
       val expiryEpochSec = nowEpochSec + authConfig.getExpirationPeriodInSecond
@@ -47,15 +46,12 @@ private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: Aut
       )
 
       JwtCirce.encode(claim, authConfig.getSecretKey, JwtEncodingAlgorithm)
-    }
 
   override def validateToken(token: String): F[Either[Throwable, AuthenticatedUser]] =
-    sync.blocking {
-      for {
-        jwtClaim <- JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither
-        authUser <- decode[AuthenticatedUser](jwtClaim.content)
-      } yield authUser
-    }
+    sync.blocking:
+      JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither >>= { jwtClaim =>
+        decode[AuthenticatedUser](jwtClaim.content)
+      }
 
 object AuthServiceLive:
   def create[F[_]: Sync](authConfig: AuthConfig, clock: Clock): AuthService[F] =

@@ -19,18 +19,16 @@ private final class PasswordHasherLive[F[_]: Sync as sync] private extends Passw
   inline private final val LengthOfSaltValue = 16
 
   override def hashPassword(password: String): F[String] =
-    sync.blocking {
+    sync.blocking:
       Password
         .hash(password)
         .addRandomSalt(LengthOfSaltValue)
         .`with`(argon2Function)
         .getResult
-    }
 
   override def checkPassword(password: String, hashedPassword: String): F[Boolean] =
-    sync.blocking {
+    sync.blocking:
       Password.check(password, hashedPassword).`with`(argon2Function)
-    }
 
 object PasswordHasherLive:
   def create[F[_]: Sync]: PasswordHasher[F] =
