@@ -44,7 +44,7 @@ object Switches:
       case None => throw AssertionError("Unimplemented instruction.")
     }
 
-  enum Omega {
+  enum Omega derives CanEqual {
     case O0
     case O1
     case O2

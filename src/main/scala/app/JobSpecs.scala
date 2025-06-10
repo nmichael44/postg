@@ -22,7 +22,7 @@ object JobSpecs:
     case FetchSystemUserByUserId(userIdStr: String) extends JobKind("FetchSystemUserByUserId")
     case LoginRequest(userDetails: UserDetails) extends JobKind("LoginRequest")
 
-  enum FetchSystemUserError:
+  enum FetchSystemUserError derives CanEqual:
     case NotFound
     case BadInput
 

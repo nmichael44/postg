@@ -36,6 +36,7 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.headers.{`WWW-Authenticate`, Authorization}
 import org.http4s.implicits.*
 import org.http4s.server.{AuthMiddleware, Router}
+import org.typelevel.ci.CIString
 import org.typelevel.log4cats.{Logger, LoggerName}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
@@ -340,6 +341,8 @@ object MovieApp:
       )
     }
 
+  given CanEqual[CIString, CIString] = CanEqual.derived
+
   private def authMiddleware[F[_]: Async](
       authService: AuthService[F],
       dsl: Http4sDsl[F],
@@ -366,6 +369,9 @@ object MovieApp:
   private type PF[T, R] = PartialFunction[T, R]
   private type ReqToWsr[F[_]] = PF[Request[F], F[WebServiceResult]]
   private type CtxReqToWsr[F[_]] = PF[ContextRequest[F, AuthenticatedUser], F[WebServiceResult]]
+
+  given CanEqual[Method, Method] = CanEqual.derived
+  given CanEqual[Uri.Path, Uri.Path] = CanEqual.derived
 
   private def publicRoutes[F[_]: { Async, Logger }](serverState: ServerState[F]): ReqToWsr[F] =
     case req @ POST -> Root / "login" =>

@@ -16,7 +16,7 @@ val password4jVersion = "1.8.3"
 lazy val root = (project in file("."))
   .settings(
     name := "postg",
-    scalacOptions ++= Seq("-deprecation", "-Xmax-inlines:64"),
+    scalacOptions ++= Seq("-deprecation", "-Xmax-inlines:64", "-language:strictEquality"),
     libraryDependencies ++= Seq(
       "org.postgresql" % "postgresql" % postgresVersion,
       "org.tpolecat" %% "doobie-core" % doobieVersion,

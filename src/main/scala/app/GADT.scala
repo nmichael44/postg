@@ -8,6 +8,14 @@ object GADT:
     case SBoolean extends Sty[Boolean]
     case SOption[T1](inner: Sty[T1]) extends Sty[Option[T1]]
 
+  object Sty:
+    // This manually-defined 'given' instance is the key to the solution.
+    // It tells the compiler that any `Sty[A]` can be compared with any `Sty[B]`,
+    // without placing any constraints on the inner types A and B.
+    // This satisfies the compiler's check before GADT pattern matching refines the types,
+    // resolving the conflict with global strict equality.
+    given [A, B]: CanEqual[Sty[A], Sty[B]] = CanEqual.derived
+
   private def zero[T](s: Sty[T]): T =
     s match
       case SInt => 0
