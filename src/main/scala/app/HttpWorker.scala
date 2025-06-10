@@ -54,7 +54,7 @@ object HttpWorker:
         cacheDetails: (Boolean, MemCache[F, Long, T]),
         f: NonEmptyVector[Long] => F[Map[Long, T]],
         toJobResult: Option[T] => JobResult,
-    ): F[JobResult] = {
+    ): F[JobResult] =
       val (cacheEnabled, cache) = cacheDetails
       for {
         _ <- U.logi(s"Fetching $itemName details for ID: $id")
@@ -78,7 +78,6 @@ object HttpWorker:
             }
         }
       } yield toJobResult(itemOpt)
-    }
 
     private val DirectorCachingDuration: FiniteDuration = 2.minutes
 
