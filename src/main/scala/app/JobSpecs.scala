@@ -13,10 +13,6 @@ object JobSpecs:
     case GetMovie(movieId: Long) extends JobKind("GetMovie")
     case GetMovieWithCounting(movieId: Long) extends JobKind("GetMovieWithCounting")
     case CreateMovie(title: String, year: Int) extends JobKind("CreateMovie")
-    case GetFileContent(fileName: String) extends JobKind("GetFileContent")
-    case ReadTwoFilesInParallel(fileName1: String, fileName2: String) extends JobKind("ReadTwoFilesInParallel")
-    case FetchCompanyData(companyName: String) extends JobKind("FetchCompanyData")
-    case FetchJsonObject() extends JobKind("FetchJsonObject")
     case CreateSystemUser(userDetails: UserDetails) extends JobKind("CreateSystemUser")
     case FetchSystemUserByLoginName(loginName: String) extends JobKind("FetchSystemUserByLoginName")
     case FetchSystemUserByUserId(userIdStr: String) extends JobKind("FetchSystemUserByUserId")
@@ -29,6 +25,9 @@ object JobSpecs:
   enum LoginRequestError:
     case InvalidLoginPassword
 
+  enum DBError:
+    case DuplicateLoginName(loginName: String)
+
   enum JobResult:
     case DirectorsDetailsByNameResult(directors: Seq[MovieDbModel.Director])
     case DirectorDetailsResult(director: Option[MovieDbModel.Director])
@@ -37,11 +36,7 @@ object JobSpecs:
     case MovieDetailsResult(movie: Option[MovieDbModel.Movie])
     case MovieWithCountingResult(movie: Option[MovieDbModel.Movie])
     case CreateMovieResult(movieId: Long)
-    case FileContentResult(content: String)
-    case TwoFilesInParallelResult(content: String)
-    case CompanyDataResult(companyData: String)
-    case JsonObjectResult(json: Json)
-    case CreateSystemUserResult(userId: Int)
+    case CreateSystemUserResult(res: Either[DBError, Int])
     case FetchSystemUserByLoginNameResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
     case FetchSystemUserByUserIdResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
     case LoginRequestResult(res: Either[LoginRequestError, String])

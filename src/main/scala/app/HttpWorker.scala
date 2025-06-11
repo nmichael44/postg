@@ -14,10 +14,6 @@ import app.ImplicitConversions.*
 import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult, LoginRequestError}
 import app.MovieApp.AppMemCaches
 import app.Utils as U
-import io.circe.*
-import io.circe.generic.auto.*
-import io.circe.syntax.*
-import org.http4s.Uri
 import org.typelevel.log4cats.Logger
 
 object HttpWorker:
@@ -152,42 +148,6 @@ object HttpWorker:
         movieId <- mr.createMovie(title, year)
       } yield JobResult.CreateMovieResult(movieId)
 
-    private def getFileContent(jk: JobKind): F[JobResult] =
-      val j = jk.asInstanceOf[JobKind.GetFileContent]
-      val fileName = j.fileName
-      for {
-        _ <- U.logi(s"Asked to read file: '$fileName'.")
-        res <- fileSystemService.readFileContent(fileName)
-      } yield JobResult.FileContentResult(res)
-
-    private def readTwoFilesInParallel(jk: JobKind): F[JobResult] =
-      val j = jk.asInstanceOf[JobKind.ReadTwoFilesInParallel]
-      val (fileName1, fileName2) = (j.fileName1, j.fileName2)
-      for {
-        _ <- U.logi(s"Reading the two files in parallel.")
-        _ <- U.logi(s"FileName1 = '$fileName1'")
-        _ <- U.logi(s"FileName2 = '$fileName2'")
-        res <- fileSystemService
-          .readTwoFilesInParallel(fileName1, fileName2)
-      } yield JobResult.TwoFilesInParallelResult(res)
-
-    private def fetchCompanyData(jk: JobKind): F[JobResult] =
-      val j = jk.asInstanceOf[JobKind.FetchCompanyData]
-      val companyName = j.companyName
-      apiClient
-        .fetchCompanyData(companyName)
-        .map(JobResult.CompanyDataResult.apply)
-
-    private def fetchJsonObject(jk: JobKind): F[JobResult] =
-      for {
-        _ <- U.logi("Fetching some json object recursively.")
-        obj <- apiClient
-          .fetchAsJson[MovieDbModel.Movie](
-            Uri.unsafeFromString("http://127.0.0.1:8080/getMovie/0"),
-          )
-          .map(_.asJson)
-      } yield JobResult.JsonObjectResult(obj)
-
     private def createSystemUser(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.CreateSystemUser]
       val userDetails = j.userDetails
@@ -196,8 +156,8 @@ object HttpWorker:
       for {
         _ <- U.logi("Creating system user.")
         hashedPassword <- passwordHasherService.hashPassword(password)
-        userId <- mr.createSystemUser(loginName, hashedPassword)
-      } yield JobResult.CreateSystemUserResult(userId)
+        res <- mr.createSystemUser(loginName, hashedPassword)
+      } yield JobResult.CreateSystemUserResult(res)
 
     private def fetchSystemUserByLoginName(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.FetchSystemUserByLoginName]
@@ -246,10 +206,6 @@ object HttpWorker:
       classOf[JobKind.GetMovie]                   -> getMovie,
       classOf[JobKind.GetMovieWithCounting]       -> getMovieWithCounting,
       classOf[JobKind.CreateMovie]                -> createMovie,
-      classOf[JobKind.GetFileContent]             -> getFileContent,
-      classOf[JobKind.ReadTwoFilesInParallel]     -> readTwoFilesInParallel,
-      classOf[JobKind.FetchCompanyData]           -> fetchCompanyData,
-      classOf[JobKind.FetchJsonObject]            -> fetchJsonObject,
       classOf[JobKind.CreateSystemUser]           -> createSystemUser,
       classOf[JobKind.FetchSystemUserByLoginName] -> fetchSystemUserByLoginName,
       classOf[JobKind.FetchSystemUserByUserId]    -> fetchSystemUserByUserId,

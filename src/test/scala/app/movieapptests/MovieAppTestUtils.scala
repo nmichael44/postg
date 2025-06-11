@@ -6,6 +6,7 @@ import cats.effect.MonadCancelThrow
 import scala.util.control.NoStackTrace
 
 import app.services.MovieRepositoryService
+import app.JobSpecs.DBError
 import app.MovieDbModel
 
 object MovieAppTestUtils:
@@ -25,7 +26,7 @@ object MovieAppTestUtils:
       mc.raiseError(MovieRepositoryServiceNotImplemented)
     override def createMovie(title: String, year: Int): F[Long] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
-    override def createSystemUser(loginName: String, hashedPassword: String): F[Int] =
+    override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Int]] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
     override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsInDb]] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)

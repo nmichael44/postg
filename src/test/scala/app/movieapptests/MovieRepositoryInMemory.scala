@@ -7,6 +7,7 @@ import cats.syntax.all.*
 import java.time.LocalDate
 
 import app.services.MovieRepositoryService
+import app.JobSpecs.DBError
 import app.MovieDbModel
 
 final class MovieRepositoryInMemory[F[_]: Async as async](
@@ -53,7 +54,7 @@ final class MovieRepositoryInMemory[F[_]: Async as async](
       (m.updated(movieId, MovieDbModel.Movie(movieId, title, year)), movieId)
     }
 
-  override def createSystemUser(loginName: String, hashedPassword: String): F[Int] =
+  override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Int]] =
     ???
 
   override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsInDb]] =

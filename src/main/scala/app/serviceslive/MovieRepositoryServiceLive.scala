@@ -2,14 +2,16 @@ package app.serviceslive
 
 import cats.data.NonEmptyVector
 import cats.effect.Async
+import cats.implicits.*
 
 import app.services.MovieRepositoryService
+import app.JobSpecs.DBError
 import app.MovieDbModel
 import app.MovieDbModel.UserDetailsInDb
 import doobie.implicits.*
 import doobie.postgres.implicits.*
 import doobie.util.transactor.Transactor
-import fs2.Stream.*
+import org.postgresql.util.PSQLException
 
 private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transactor[F]) extends MovieRepositoryService[F]:
   override def getDirectorsDetails(
@@ -93,9 +95,19 @@ private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transac
       .withUniqueGeneratedKeys[Long]("movieid")
       .transact(xa)
 
-  override def createSystemUser(loginName: String, hashedPassword: String): F[Int] =
+  private val PostgresDuplicateValueSqlState: String = "23505"
+
+  override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Int]] =
     sql"""insert into systemUsers (loginName, hashedPassword) values($loginName, $hashedPassword)""".update
       .withUniqueGeneratedKeys[Int]("userid")
+      .attempt
+      .map {
+        case Right(userId) =>
+          Right(userId)
+        case Left(e: PSQLException) if e.getSQLState == PostgresDuplicateValueSqlState =>
+          Left(DBError.DuplicateLoginName(loginName))
+        case Left(e) => throw e
+      }
       .transact(xa)
 
   override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsInDb]] =

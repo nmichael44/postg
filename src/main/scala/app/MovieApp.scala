@@ -7,15 +7,15 @@ import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
 import cats.Applicative
 
-import java.time.Clock
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
 import app.serviceslive.{AuthServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
 import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
-import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchCompanyData, FetchJsonObject, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetFileContent, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest, ReadTwoFilesInParallel}
-import app.JobSpecs.JobResult.{ActorDetailsResult, CompanyDataResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, FileContentResult, JsonObjectResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, TwoFilesInParallelResult}
+import app.JobSpecs.DBError
+import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest}
+import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult}
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
@@ -59,15 +59,16 @@ object MovieApp:
       } yield LiveServerState[F](movieReqCounts, jobQueue)
 
   private[app] enum WebServiceResult:
-    case OkStringRes(s: String)
     case OkJsonRes(json: Json)
     case NotFoundRes(s: String)
+    case ConflictRes(s: String)
     case BadRequestRes(e: String)
     case UnauthorizedRes(e: String)
     case InternalServerErrorRes()
 
   private[app] final class Render[F[_]: Async as async](dsl: Http4sDsl[F]):
     import dsl.*
+    import org.http4s.circe.CirceEntityEncoder.*
     import WebServiceResult.*
 
     private val NotImplemented: Exception =
@@ -79,15 +80,42 @@ object MovieApp:
       params = Map("error" -> "invalid_grant", "error_description" -> "Invalid username or password"),
     )
 
+    private final case class ApiError(message: String, errorCode: String, timestamp: java.time.Instant)
+
+    private object ApiError:
+      def apply(message: String): F[ApiError] =
+        apply(message, "")
+
+      def apply(message: String, errorCode: String): F[ApiError] =
+        TimeUtils.nowInstant.map(ApiError(message, errorCode, _))
+
+    private def okJsonToResponse(wsr: WebServiceResult): F[Response[F]] =
+      Ok(wsr.asInstanceOf[OkJsonRes].json)
+
+    private def noFoundToResponse(wsr: WebServiceResult): F[Response[F]] =
+      ApiError(wsr.asInstanceOf[NotFoundRes].s, "NOTFOUND") >>= (apiErr => NotFound(apiErr))
+
+    private def conflictToResponse(wsr: WebServiceResult): F[Response[F]] =
+      ApiError(wsr.asInstanceOf[ConflictRes].s, "CONFLICT") >>= (apiErr => Conflict(apiErr))
+
+    private def badRequestToResponse(wsr: WebServiceResult): F[Response[F]] =
+      ApiError(wsr.asInstanceOf[BadRequestRes].e, "BADREQUEST") >>= (apiErr => BadRequest(apiErr))
+
+    private def unauthorizedToResponse(wsr: WebServiceResult): F[Response[F]] =
+      ApiError(wsr.asInstanceOf[BadRequestRes].e, "UNAUTHORIZED") >>= { apiErr =>
+        Unauthorized(`WWW-Authenticate`(ErrorChallenge), apiErr)
+      }
+
+    private def internalServerErrorToResponse(wsr: WebServiceResult): F[Response[F]] =
+      InternalServerError()
+
     private val ResultHandlerMap: Map[Class[? <: WebServiceResult], WebServiceResult => F[Response[F]]] = Map(
-      classOf[OkStringRes]   -> { wsr => Ok(wsr.asInstanceOf[OkStringRes].s) },
-      classOf[OkJsonRes]     -> { wsr => Ok(wsr.asInstanceOf[OkJsonRes].json) },
-      classOf[NotFoundRes]   -> { wsr => NotFound(wsr.asInstanceOf[NotFoundRes].s) },
-      classOf[BadRequestRes] -> { wsr => BadRequest(wsr.asInstanceOf[BadRequestRes].e) },
-      classOf[UnauthorizedRes] -> { wsr =>
-        Unauthorized(`WWW-Authenticate`(ErrorChallenge), wsr.asInstanceOf[UnauthorizedRes].e)
-      },
-      classOf[InternalServerErrorRes] -> { _ => InternalServerError() },
+      classOf[OkJsonRes]              -> okJsonToResponse,
+      classOf[NotFoundRes]            -> noFoundToResponse,
+      classOf[ConflictRes]            -> conflictToResponse,
+      classOf[BadRequestRes]          -> badRequestToResponse,
+      classOf[UnauthorizedRes]        -> unauthorizedToResponse,
+      classOf[InternalServerErrorRes] -> internalServerErrorToResponse,
     )
 
     def apply(wsr: WebServiceResult): F[Response[F]] =
@@ -173,12 +201,6 @@ object MovieApp:
 
   private val allowedParamsForGetDirectors: Set[String] = Set(firstNameParam, lastNameParam)
 
-  private object fileNameQueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("fileName")
-
-  private object fileName1QueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("fileName1")
-
-  private object fileName2QueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("fileName2")
-
   private object titleQueryParamDecoderMatcher extends QueryParamDecoderMatcher[String]("title")
 
   private object yearQueryParamDecoderMatcher extends QueryParamDecoderMatcher[Int]("year")
@@ -230,45 +252,6 @@ object MovieApp:
       cmr => WebServiceResult.OkJsonRes(cmr.asJson),
     )
 
-  private def getFileContent[F[_]: { Async, Logger as logger }](
-      fileName: String,
-      serverState: ServerState[F],
-  ): F[WebServiceResult] =
-    jobHandler[F, FileContentResult](
-      "Getting file content.",
-      serverState,
-      GetFileContent(fileName),
-      fc => WebServiceResult.OkStringRes(fc.content),
-    )
-
-  private def readTwoFilesInParallel[F[_]: { Async, Logger as logger }](
-      fileName1: String,
-      fileName2: String,
-      serverState: ServerState[F],
-  ): F[WebServiceResult] =
-    jobHandler[F, TwoFilesInParallelResult](
-      "Reading two files in parallel.",
-      serverState,
-      ReadTwoFilesInParallel(fileName1, fileName2),
-      tfp => WebServiceResult.OkStringRes(tfp.content),
-    )
-
-  private def fetchCompanyData[F[_]: { Async, Logger }](companyName: String, serverState: ServerState[F]): F[WebServiceResult] =
-    jobHandler[F, CompanyDataResult](
-      "Fetching company data.",
-      serverState,
-      FetchCompanyData(companyName),
-      cd => WebServiceResult.OkStringRes(cd.companyData),
-    )
-
-  private def fetchJasonObject[F[_]: { Async, Logger as logger }](serverState: ServerState[F]): F[WebServiceResult] =
-    jobHandler[F, JsonObjectResult](
-      "Fetching json object.",
-      serverState,
-      FetchJsonObject(),
-      jor => WebServiceResult.OkJsonRes(jor.json),
-    )
-
   private given [F[_]: Async]: EntityDecoder[F, MovieDbModel.UserDetails] =
     jsonOf[F, MovieDbModel.UserDetails]
 
@@ -281,7 +264,13 @@ object MovieApp:
         "Creating system user.",
         serverState,
         CreateSystemUser(userDetails),
-        csur => WebServiceResult.OkJsonRes(csur.asJson),
+        { case CreateSystemUserResult(res) =>
+          res match {
+            case Left(DBError.DuplicateLoginName(loginName)) =>
+              WebServiceResult.ConflictRes(s"The given loginName '$loginName' was already present in the database.")
+            case Right(userId) => WebServiceResult.OkJsonRes(Json.obj("userId" -> userId.asJson))
+          }
+        },
       )
     }
 
@@ -399,16 +388,6 @@ object MovieApp:
         titleQueryParamDecoderMatcher(title) +&
         yearQueryParamDecoderMatcher(year) as _ =>
       createMovie(title, year, serverState)
-    case GET -> Root / "getFile" :? fileNameQueryParamDecoderMatcher(fileName) as _ =>
-      getFileContent(fileName, serverState)
-    case GET -> Root / "readTwoFilesInParallel" :?
-        fileName1QueryParamDecoderMatcher(fileName1) +&
-        fileName2QueryParamDecoderMatcher(fileName2) as _ =>
-      readTwoFilesInParallel(fileName1, fileName2, serverState)
-    case GET -> Root / "fetchCompanyData" / companyName as _ =>
-      fetchCompanyData(companyName, serverState)
-    case GET -> Root / "getJsonObject" as _ =>
-      fetchJasonObject(serverState)
     case ctxReq @ POST -> Root / "createSystemUser" as _ =>
       createSystemUser(ctxReq, serverState)
     case GET -> Root / "fetchSystemUserByLoginName" / loginName as _ =>
@@ -593,7 +572,7 @@ object MovieApp:
         val serverStateUpdateService: ServerStateUpdateService[F] = ServerStateUpdateServiceLive.create[F](serverState)
         val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create[F]
 
-        val authService: AuthService[F] = AuthServiceLive.create[F](appConfig.getAuthConfig, Clock.systemUTC())
+        val authService: AuthService[F] = AuthServiceLive.create[F](appConfig.getAuthConfig, java.time.Clock.systemUTC())
 
         HttpWorker.startWorkers[F](
           appConfig.getBackendServerConfig,

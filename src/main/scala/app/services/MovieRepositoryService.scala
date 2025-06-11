@@ -3,6 +3,7 @@ package app.services
 import cats.data.NonEmptyVector
 import cats.effect.Async
 
+import app.JobSpecs.DBError
 import app.MovieDbModel
 
 trait MovieRepositoryService[F[_]]:
@@ -23,7 +24,7 @@ trait MovieRepositoryService[F[_]]:
 
   def createMovie(title: String, year: Int): F[Long]
 
-  def createSystemUser(loginName: String, hashedPassword: String): F[Int]
+  def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Int]]
 
   def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsInDb]]
 
