@@ -2,6 +2,7 @@ package app
 
 import cats.effect.{Async, Concurrent, Resource}
 import cats.syntax.all.*
+import cats.FlatMap
 
 import java.nio.file.Paths
 import scala.io.Source
@@ -95,8 +96,20 @@ object Utils:
       .fromAutoCloseable(async.blocking(Source.fromFile(Paths.get(path).toFile)))
       .evalMap(source => async.blocking(source.mkString) >>= parseDatabaseConfig[F])
 
-  def logi[F[_]: Logger as logger](s: String): F[Unit] =
+  def logInfo[F[_]: Logger as logger](s: String): F[Unit] =
     logger.info(s)
 
-  def loge[F[_]: Logger as logger](e: Throwable, s: String): F[Unit] =
+  def logError[F[_]: Logger as logger](e: Throwable, s: String): F[Unit] =
     logger.error(e)(s)
+
+  def logi[F[_]: Logger](uuid: String, s: String): F[Unit] =
+    logInfo(s"[$uuid] :: $s")
+
+  def loge[F[_]: Logger](e: Throwable, uuid: String, s: String): F[Unit] =
+    logError(e, s"[$uuid] :: $s")
+
+  def logi[F[_]: { Logger, FlatMap }](uuidLocal: FLocal[F, Option[String]], s: String): F[Unit] =
+    uuidLocal.get >>= (uuidOpt => uuidOpt.fold(logInfo(s))(logi(_, s)))
+
+  def loge[F[_]: { Logger, FlatMap }](e: Throwable, uuidLocal: FLocal[F, Option[String]], s: String): F[Unit] =
+    uuidLocal.get >>= (uuidOpt => uuidOpt.fold(logError(e, s))(loge(e, _, s)))

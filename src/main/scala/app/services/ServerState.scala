@@ -8,5 +8,4 @@ import app.HttpWorker.Job
 
 trait ServerState[F[_]]:
   val movieRequestCounts: Ref[F, Map[Long, Int]]
-
   val jobQueue: Queue[F, HttpWorker.Job[F]]

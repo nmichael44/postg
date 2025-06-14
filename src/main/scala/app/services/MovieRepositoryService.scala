@@ -3,7 +3,7 @@ package app.services
 import cats.data.NonEmptyVector
 import cats.effect.Async
 
-import app.JobSpecs.DBError
+import app.services.MovieRepositoryUtils.DBError
 import app.MovieDbModel
 
 trait MovieRepositoryService[F[_]]:

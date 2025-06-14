@@ -5,10 +5,10 @@ import cats.effect.{Async, Ref}
 import cats.syntax.all.*
 
 import java.time.LocalDate
-
 import app.services.MovieRepositoryService
-import app.JobSpecs.DBError
+import app.JobSpecs.CreateSystemUserError
 import app.MovieDbModel
+import app.services.MovieRepositoryUtils.DBError
 
 final class MovieRepositoryInMemory[F[_]: Async as async](
     directorsRef: Ref[F, Map[Long, MovieDbModel.Director]],

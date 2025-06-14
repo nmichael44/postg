@@ -5,7 +5,7 @@ import cats.effect.Async
 import cats.implicits.*
 
 import app.services.MovieRepositoryService
-import app.JobSpecs.DBError
+import app.services.MovieRepositoryUtils.DBError
 import app.MovieDbModel
 import app.MovieDbModel.UserDetailsInDb
 import doobie.implicits.*

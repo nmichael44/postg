@@ -6,7 +6,7 @@ import cats.effect.MonadCancelThrow
 import scala.util.control.NoStackTrace
 
 import app.services.MovieRepositoryService
-import app.JobSpecs.DBError
+import app.services.MovieRepositoryUtils.DBError
 import app.MovieDbModel
 
 object MovieAppTestUtils:

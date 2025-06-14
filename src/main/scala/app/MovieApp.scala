@@ -4,16 +4,17 @@ import cats.data.{EitherT, Kleisli, OptionT}
 import cats.effect.*
 import cats.effect.kernel.{Async, Resource}
 import cats.effect.std.{Queue, Supervisor}
+import cats.effect.IOLocal
 import cats.syntax.all.*
 import cats.Applicative
 
+import java.util.UUID
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
 import app.serviceslive.{AuthServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
-import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult}
-import app.JobSpecs.DBError
+import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult}
 import app.MovieDbModel.DirectorPath
@@ -28,6 +29,7 @@ import org.http4s
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.client.middleware.FollowRedirect
+import org.http4s.client.Client
 import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
 import org.http4s.dsl.io.*
 import org.http4s.dsl.Http4sDsl
@@ -37,7 +39,7 @@ import org.http4s.headers.{`WWW-Authenticate`, Authorization}
 import org.http4s.implicits.*
 import org.http4s.server.{AuthMiddleware, Router}
 import org.typelevel.ci.CIString
-import org.typelevel.log4cats.{Logger, LoggerName}
+import org.typelevel.log4cats.{Logger, LoggerName, StructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
 import services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
@@ -50,12 +52,11 @@ object MovieApp:
   ) extends ServerState[F]
 
   private[app] object LiveServerState:
-    def create[F[_]: Async](backendServer: BackendServerConfig): F[ServerState[F]] =
+    def create[F[_]: Async as async](backendServer: BackendServerConfig): F[ServerState[F]] =
       val boundedQueueCapacity = backendServer.getBoundedQueueCapacity
       for {
         movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
         jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](boundedQueueCapacity)
-
       } yield LiveServerState[F](movieReqCounts, jobQueue)
 
   private[app] enum WebServiceResult:
@@ -127,22 +128,23 @@ object MovieApp:
   private def jobHandler[F[_]: { Async as async, Logger }, T <: JobResult](
       msg: String,
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
       job: JobKind,
       f: T => WebServiceResult,
   ): F[WebServiceResult] =
     val jobName = job.shortName
-    val prompt = s"Job '$jobName'"
     val res: F[Either[Throwable, JobResult]] = for {
-      _ <- U.logi(msg)
+      uuid <- uuidGen.generateUUIDAsString
+      _ <- U.logi(uuid, msg)
       deferred <- Deferred[F, Either[Throwable, JobResult]]
-      _ <- U.logi(s"$jobName: being queued.")
-      _ <- serverState.jobQueue.offer(HttpWorker.Job(job, deferred))
-      _ <- U.logi(s"$prompt: queued. Waiting for response.")
+      _ <- U.logi(uuid, s"$jobName: being queued.")
+      _ <- serverState.jobQueue.offer(HttpWorker.Job(job, deferred, uuid))
+      _ <- U.logi(uuid, "Waiting for response.")
       outcome <- deferred.get // Wait for the answer
-      _ <- U.logi(s"$prompt: Response received.")
+      _ <- U.logi(uuid, "Response received.")
       _ <- outcome match {
-        case Right(_) => U.logi(s"$prompt: Successful response.")
-        case Left(e) => U.loge(e, s"$prompt: Failed with exception.")
+        case Right(_) => U.logi(uuid, "Successful response.")
+        case Left(e) => U.loge(e, uuid, "Failed with exception.")
       }
     } yield outcome
 
@@ -155,8 +157,9 @@ object MovieApp:
     resEither.fold(_ => WebServiceResult.InternalServerErrorRes(), jr => f(jr.asInstanceOf[T]))
 
   private def getDirectorsDetailsByName[F[_]: { Async, Logger as logger }](
-      ctxReq: ContextRequest[F, AuthenticatedUser],
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
+      ctxReq: ContextRequest[F, AuthenticatedUser],
       directorPath: DirectorPath,
   ): F[WebServiceResult] =
     ensureOnlyAllowedParams(allowedParamsForGetDirectors, ctxReq)
@@ -164,6 +167,7 @@ object MovieApp:
         jobHandler[F, DirectorsDetailsByNameResult](
           "Fetching directors details by name.",
           serverState,
+          uuidGen,
           GetDirectorsDetailsByName(directorPath.firstName, directorPath.lastName),
           dirs => WebServiceResult.OkJsonRes(dirs.asJson),
         )
@@ -171,22 +175,26 @@ object MovieApp:
 
   private def getDirectorDetails[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
       directorId: Long,
   ): F[WebServiceResult] =
     jobHandler[F, DirectorDetailsResult](
       "Fetching directors details.",
       serverState,
+      uuidGen,
       GetDirectorDetails(directorId),
       _.director.fold(WebServiceResult.NotFoundRes("Director not found"))(dir => WebServiceResult.OkJsonRes(dir.asJson)),
     )
 
   private def getActorDetails[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
       actorId: Long,
   ): F[WebServiceResult] =
     jobHandler[F, ActorDetailsResult](
       "Fetching actor details.",
       serverState,
+      uuidGen,
       GetActorDetails(actorId),
       _.actor.fold(WebServiceResult.NotFoundRes("Actor not found"))(act => WebServiceResult.OkJsonRes(act.asJson)),
     )
@@ -207,33 +215,39 @@ object MovieApp:
 
   private def getMoviesByDirector[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
       directorId: Long,
   ): F[WebServiceResult] =
     jobHandler[F, MoviesByDirectorResult](
       "Fetching movies by director Id.",
       serverState,
+      uuidGen,
       GetMoviesByDirector(directorId),
       mvs => WebServiceResult.OkJsonRes(mvs.asJson),
     )
 
   private def getMovie[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
       movieId: Long,
   ): F[WebServiceResult] =
     jobHandler[F, MovieDetailsResult](
       "Fetching movie by Id.",
       serverState,
+      uuidGen,
       GetMovie(movieId),
       _.movie.fold(WebServiceResult.NotFoundRes("Movie not found"))(mv => WebServiceResult.OkJsonRes(mv.asJson)),
     )
 
   private def getMovieWithCounting[F[_]: { Async, Logger as logger }](
-      movieId: Long,
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
+      movieId: Long,
   ): F[WebServiceResult] =
     jobHandler[F, MovieWithCountingResult](
       "Fetching movie by Id with counting.",
       serverState,
+      uuidGen,
       GetMovieWithCounting(movieId),
       _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!"))(mv =>
         WebServiceResult.OkJsonRes(mv.asJson),
@@ -241,13 +255,15 @@ object MovieApp:
     )
 
   private def createMovie[F[_]: { Async, Logger as logger }](
+      serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
       title: String,
       year: Int,
-      serverState: ServerState[F],
   ): F[WebServiceResult] =
     jobHandler[F, CreateMovieResult](
       "Creating new movie.",
       serverState,
+      uuidGen,
       CreateMovie(title, year),
       cmr => WebServiceResult.OkJsonRes(cmr.asJson),
     )
@@ -256,37 +272,46 @@ object MovieApp:
     jsonOf[F, MovieDbModel.UserDetails]
 
   private def createSystemUser[F[_]: { Async, Logger }](
-      req: Request[F],
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
+      req: Request[F],
   ): F[WebServiceResult] =
     req.as[MovieDbModel.UserDetails] >>= { userDetails =>
       jobHandler[F, CreateSystemUserResult](
         "Creating system user.",
         serverState,
+        uuidGen,
         CreateSystemUser(userDetails),
         { case CreateSystemUserResult(res) =>
           res match {
-            case Left(DBError.DuplicateLoginName(loginName)) =>
+            case Left(CreateSystemUserError.DuplicateLoginNameInDB(loginName)) =>
               WebServiceResult.ConflictRes(s"The given loginName '$loginName' was already present in the database.")
-            case Right(userId) => WebServiceResult.OkJsonRes(Json.obj("userId" -> userId.asJson))
+            case Left(CreateSystemUserError.BadPassword(errorList)) =>
+              val errorStr = errorList.toVector.mkString("\"", "\", \"", "\"")
+              WebServiceResult.BadRequestRes(s"Invalid password. Errors: [$errorStr]")
+            case Right(userId) =>
+              WebServiceResult.OkJsonRes(Json.obj("userId" -> userId.asJson))
           }
         },
       )
     }
 
   private def createSystemUser[F[_]: { Async, Logger }](
-      ctxReq: ContextRequest[F, AuthenticatedUser],
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
+      ctxReq: ContextRequest[F, AuthenticatedUser],
   ): F[WebServiceResult] =
-    createSystemUser(ctxReq.req, serverState)
+    createSystemUser(serverState, uuidGen, ctxReq.req)
 
   def fetchSystemUserByLoginName[F[_]: { Async, Logger }](
-      loginName: String,
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
+      loginName: String,
   ): F[WebServiceResult] =
     jobHandler[F, FetchSystemUserByLoginNameResult](
       "Fetching system user by loginName.",
       serverState,
+      uuidGen,
       FetchSystemUserByLoginName(loginName),
       { case FetchSystemUserByLoginNameResult(res) =>
         res match {
@@ -297,12 +322,14 @@ object MovieApp:
     )
 
   private def fetchSystemUserByUserId[F[_]: { Async, Logger }](
-      userIdStr: String,
       serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
+      userIdStr: String,
   ): F[WebServiceResult] =
     jobHandler[F, FetchSystemUserByUserIdResult](
       "Fetching system user by UserId.",
       serverState,
+      uuidGen,
       FetchSystemUserByUserId(userIdStr),
       { case FetchSystemUserByUserIdResult(res) =>
         res match {
@@ -315,11 +342,16 @@ object MovieApp:
       },
     )
 
-  private def processLoginRequest[F[_]: { Async, Logger }](req: Request[F], serverState: ServerState[F]): F[WebServiceResult] =
+  private def processLoginRequest[F[_]: { Async, Logger }](
+      serverState: ServerState[F],
+      uuidGen: UUIDGenerator[F],
+      req: Request[F],
+  ): F[WebServiceResult] =
     req.as[MovieDbModel.UserDetails] >>= { userDetails =>
       jobHandler[F, LoginRequestResult](
         "Processing login request.",
         serverState,
+        uuidGen,
         LoginRequest(userDetails),
         { case LoginRequestResult(res) =>
           res match {
@@ -332,13 +364,13 @@ object MovieApp:
 
   given CanEqual[CIString, CIString] = CanEqual.derived
 
-  private def authMiddleware[F[_]: Async](
+  private def createAuthMiddleware[F[_]: Async](
       authService: AuthService[F],
       dsl: Http4sDsl[F],
   ): AuthMiddleware[F, AuthenticatedUser] =
     import dsl.*
 
-    val authUser: Kleisli[F, Request[F], Either[String, AuthenticatedUser]] = Kleisli { request =>
+    val reqToAuthUser: Kleisli[F, Request[F], Either[String, AuthenticatedUser]] = Kleisli { request =>
       val eitherToken: Either[String, String] =
         request.headers.get[Authorization] match {
           case Some(Authorization(Credentials.Token(AuthScheme.Bearer, token))) => Right(token)
@@ -353,7 +385,7 @@ object MovieApp:
 
     val onFailure: AuthedRoutes[String, F] = Kleisli.liftF(OptionT.liftF(Forbidden("Invalid token!")))
 
-    AuthMiddleware(authUser, onFailure)
+    AuthMiddleware(reqToAuthUser, onFailure)
 
   private type PF[T, R] = PartialFunction[T, R]
   private type ReqToWsr[F[_]] = PF[Request[F], F[WebServiceResult]]
@@ -362,66 +394,61 @@ object MovieApp:
   given CanEqual[Method, Method] = CanEqual.derived
   given CanEqual[Uri.Path, Uri.Path] = CanEqual.derived
 
-  private def publicRoutes[F[_]: { Async, Logger }](serverState: ServerState[F]): ReqToWsr[F] =
-    case req @ POST -> Root / "login" =>
-      processLoginRequest(req, serverState)
-    // This should be removed after we are done testing.
-    case req @ POST -> Root / "createSystemUser" =>
-      createSystemUser(req, serverState)
+  private def publicRoutes[F[_]: { Async, Logger }](deps: AppDependencies[F]): ReqToWsr[F] =
+    val serverState = deps.serverState
+    val uuidGen = deps.uuidGen
+    {
+      case req @ POST -> Root / "login" =>
+        processLoginRequest(serverState, uuidGen, req)
+      // This should be removed after we are done testing.
+      case req @ POST -> Root / "createSystemUser" =>
+        createSystemUser(serverState, uuidGen, req)
+    }
 
-  private def authedRoutes[F[_]: { Async, Logger }](serverState: ServerState[F]): CtxReqToWsr[F] =
-    case ctxReq @ GET -> Root / "getDirectorsByName" :?
-        firstNameOptionalQueryParamDecoderMatcher(firstName) +&
-        lastNameOptionalQueryParamDecoderMatcher(lastName) as _ =>
-      getDirectorsDetailsByName(ctxReq, serverState, DirectorPath(firstName, lastName))
-    case GET -> Root / "getDirector" / LongVar(directorId) as _ =>
-      getDirectorDetails(serverState, directorId)
-    case GET -> Root / "getActor" / LongVar(actorId) as _ =>
-      getActorDetails(serverState, actorId)
-    case GET -> Root / "getMoviesByDirector" / LongVar(directorId) as _ =>
-      getMoviesByDirector(serverState, directorId)
-    case GET -> Root / "getMovie" / LongVar(movieId) as _ =>
-      getMovie(serverState, movieId)
-    case GET -> Root / "getMovieWithCounting" / LongVar(movieId) as _ =>
-      getMovieWithCounting(movieId, serverState)
-    case POST -> Root / "createMovie" :?
-        titleQueryParamDecoderMatcher(title) +&
-        yearQueryParamDecoderMatcher(year) as _ =>
-      createMovie(title, year, serverState)
-    case ctxReq @ POST -> Root / "createSystemUser" as _ =>
-      createSystemUser(ctxReq, serverState)
-    case GET -> Root / "fetchSystemUserByLoginName" / loginName as _ =>
-      fetchSystemUserByLoginName(loginName, serverState)
-    case GET -> Root / "fetchSystemUserByUserId" / userIdStr as _ =>
-      fetchSystemUserByUserId(userIdStr, serverState)
-
-  private def publicRoutesPath[F[_]: { Async, Logger }](
-      serverState: ServerState[F],
-      render: Render[F],
-  ): (String, HttpRoutes[F]) =
-    "/" -> HttpRoutes.of[F](publicRoutes(serverState).andThen(_ >>= render.apply))
+  private def authedRoutes[F[_]: { Async, Logger }](deps: AppDependencies[F]): CtxReqToWsr[F] =
+    val serverState = deps.serverState
+    val uuidGen = deps.uuidGen
+    {
+      case ctxReq @ GET -> Root / "getDirectorsByName" :?
+          firstNameOptionalQueryParamDecoderMatcher(firstName) +&
+          lastNameOptionalQueryParamDecoderMatcher(lastName) as _ =>
+        getDirectorsDetailsByName(serverState, uuidGen, ctxReq, DirectorPath(firstName, lastName))
+      case GET -> Root / "getDirector" / LongVar(directorId) as _ =>
+        getDirectorDetails(serverState, uuidGen, directorId)
+      case GET -> Root / "getActor" / LongVar(actorId) as _ =>
+        getActorDetails(serverState, uuidGen, actorId)
+      case GET -> Root / "getMoviesByDirector" / LongVar(directorId) as _ =>
+        getMoviesByDirector(serverState, uuidGen, directorId)
+      case GET -> Root / "getMovie" / LongVar(movieId) as _ =>
+        getMovie(serverState, uuidGen, movieId)
+      case GET -> Root / "getMovieWithCounting" / LongVar(movieId) as _ =>
+        getMovieWithCounting(serverState, uuidGen, movieId)
+      case POST -> Root / "createMovie" :?
+          titleQueryParamDecoderMatcher(title) +&
+          yearQueryParamDecoderMatcher(year) as _ =>
+        createMovie(serverState, uuidGen, title, year)
+      case ctxReq @ POST -> Root / "createSystemUser" as _ =>
+        createSystemUser(serverState, uuidGen, ctxReq)
+      case GET -> Root / "fetchSystemUserByLoginName" / loginName as _ =>
+        fetchSystemUserByLoginName(serverState, uuidGen, loginName)
+      case GET -> Root / "fetchSystemUserByUserId" / userIdStr as _ =>
+        fetchSystemUserByUserId(serverState, uuidGen, userIdStr)
+    }
+  private def publicRoutesPath[F[_]: { Async, Logger }](deps: AppDependencies[F], render: Render[F]): (String, HttpRoutes[F]) =
+    "/" -> HttpRoutes.of[F](publicRoutes(deps).andThen(_ >>= render.apply))
 
   private def apiRoutesPath[F[_]: { Async, Logger }](
-      serverState: ServerState[F],
-      authService: AuthService[F],
+      deps: AppDependencies[F],
       dsl: Http4sDsl[F],
       render: Render[F],
   ): (String, HttpRoutes[F]) =
     val authRoutes: AuthedRoutes[AuthenticatedUser, F] =
-      AuthedRoutes.of[AuthenticatedUser, F](authedRoutes(serverState).andThen(_ >>= render.apply))
+      AuthedRoutes.of[AuthenticatedUser, F](authedRoutes(deps).andThen(_ >>= render.apply))
 
-    "/api" -> authMiddleware(authService, dsl)(authRoutes)
+    "/api" -> createAuthMiddleware(deps.authService, dsl)(authRoutes)
 
-  private def allRoutes[F[_]: { Async, Logger }](
-      serverState: ServerState[F],
-      authService: AuthService[F],
-      dsl: Http4sDsl[F],
-      render: Render[F],
-  ): HttpApp[F] =
-    Router[F](
-      publicRoutesPath(serverState, render),
-      apiRoutesPath(serverState, authService, dsl, render),
-    ).orNotFound
+  private def allRoutes[F[_]: { Async, Logger }](deps: AppDependencies[F], dsl: Http4sDsl[F], render: Render[F]): HttpApp[F] =
+    Router[F](publicRoutesPath(deps, render), apiRoutesPath(deps, dsl, render)).orNotFound
 
   private def ensureOnlyAllowedParams[F[_]: Applicative as app](
       allowedParams: Set[String],
@@ -482,20 +509,20 @@ object MovieApp:
       movieMemCacheConfig.getCleanupDurationInMillis.milliseconds,
     )
 
-  final class AppMemCaches[F[_]](
+  final class MemCaches[F[_]](
       val directorCache: (Boolean, MemCache[F, Long, MovieDbModel.Director]),
       val actorCache: (Boolean, MemCache[F, Long, MovieDbModel.Actor]),
       val movieCache: (Boolean, MemCache[F, Long, MovieDbModel.Movie]),
   )
 
-  private def createMemCaches[F[_]: { Temporal, Logger }](mcc: MemCacheConfig): Resource[F, AppMemCaches[F]] =
+  private def createMemCaches[F[_]: { Temporal, Logger }](mcc: MemCacheConfig): Resource[F, MemCaches[F]] =
     (
       createDirectorMemCache(mcc.getDirectorMemCacheConfig).tupleLeft(mcc.getDirectorMemCacheConfig.getCacheEnabled),
       createActorMemCache(mcc.getActorMemCacheConfig).tupleLeft(mcc.getActorMemCacheConfig.getCacheEnabled),
       createMovieMemCache(mcc.getMovieMemCacheConfig).tupleLeft(mcc.getMovieMemCacheConfig.getCacheEnabled),
-    ).mapN((d, a, m) => AppMemCaches[F](d, a, m))
+    ).mapN((d, a, m) => MemCaches[F](d, a, m))
 
-  private def createConfigResource[F[_]: { Async as async, Logger }]() =
+  private def createConfigResource[F[_]: { Async as async }]() =
     Resource.eval[F, AppConfig](
       async.fromEither(
         ConfigSource.default
@@ -519,36 +546,36 @@ object MovieApp:
       .withHttpApp(httpApp)
       .build
 
-  private type CoreResources[F[_]] =
-    Resource[
-      F,
-      (
-          AppConfig,
-          ServerState[F],
-          http4s.client.Client[F],
-          Supervisor[F],
-          Transactor[F],
-          AppMemCaches[F],
-      ),
-    ]
-
-  private def runHttpApp[F[_]: { Async, Network, Logger }](
-      serverState: ServerState[F],
-      authService: AuthService[F],
-      appConfig: AppConfig,
-  ): F[ExitCode] =
+  private def runHttpApp[F[_]: { Async, Network, Logger }](deps: AppDependencies[F]): F[ExitCode] =
     val dsl: Http4sDsl[F] = Http4sDsl[F]
     val render: Render[F] = Render(dsl)
-    val (serverHostIP, serverHostPort) = getServerHostIPPort(appConfig)
-    val httpApp: HttpApp[F] = allRoutes[F](serverState, authService, dsl, render)
+    val (serverHostIP, serverHostPort) = getServerHostIPPort(deps.appConfig)
+    val httpApp: HttpApp[F] = allRoutes[F](deps, dsl, render)
 
     createServerResource(serverHostIP, serverHostPort, httpApp)
-      .use(server => U.logi(s"Server started with base uri: '${server.baseUri.toString}'.") *> Async[F].never)
+      .use(server => U.logInfo(s"Server started with base uri: '${server.baseUri.toString}'.") *> Async[F].never)
       .as(ExitCode.Success)
 
   // This is the number of redirects Ember will perform when a response
   // specifies that it needs a redirection.
   inline private val MaxHttpClientRedirects = 5
+
+  final case class AppDependencies[F[_]](
+      appConfig: AppConfig,
+      serverState: ServerState[F],
+      memCaches: MovieApp.MemCaches[F],
+      supervisor: Supervisor[F],
+      uuidGen: UUIDGenerator[F],
+
+      // Add other services as needed
+      externalApiClientService: ExternalApiClientService[F],
+      movieRepositoryService: MovieRepositoryService[F],
+      fileSystemService: FileSystemService[F],
+      serverStateUpdateService: ServerStateUpdateService[F],
+      passwordHasherService: PasswordHasher[F],
+      authService: AuthService[F],
+      uuidLocal: FLocal[F, Option[String]],
+  )
 
   def run: IO[ExitCode] =
     type F = IO
@@ -556,35 +583,38 @@ object MovieApp:
     implicit val MovieAppLoggerName: LoggerName = LoggerName("MovieAppLogger")
 
     Slf4jLogger.create[F] >>= { implicit logger =>
-      val coreResources: CoreResources[F] = for {
+      val appDeps: Resource[F, AppDependencies[F]] = for {
         appConfig <- createConfigResource[F]()
-        appMemCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
+        memCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
+        uuidLocal <- Resource.eval(FLocal.ioLocal[Option[String]](None))
         serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxHttpClientRedirects))
         supervisor <- Supervisor[F](await = false)
         xa <- DoobieObj.xaResource[F](appConfig.getDbConnectionConfig)
-      } yield (appConfig, serverState, httpClient, supervisor, xa, appMemCaches)
-
-      coreResources.use { (appConfig, serverState, httpClient, supervisor, xa, appMemCaches) =>
+        uuidGen <- UUIDGenerator.create[F]
+      } yield {
         val externalApiClientService: ExternalApiClientService[F] = ExternalApiClientServiceLive.create[F](httpClient)
         val movieRepositoryService: MovieRepositoryService[F] = MovieRepositoryServiceLive.create[F](xa)
         val fileSystemService: FileSystemService[F] = FileSystemServiceLive.create[F]
         val serverStateUpdateService: ServerStateUpdateService[F] = ServerStateUpdateServiceLive.create[F](serverState)
         val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create[F]
-
         val authService: AuthService[F] = AuthServiceLive.create[F](appConfig.getAuthConfig, java.time.Clock.systemUTC())
 
-        HttpWorker.startWorkers[F](
-          appConfig.getBackendServerConfig,
-          movieRepositoryService,
+        AppDependencies(
+          appConfig,
+          serverState,
+          memCaches,
+          supervisor,
+          uuidGen,
           externalApiClientService,
+          movieRepositoryService,
           fileSystemService,
           serverStateUpdateService,
           passwordHasherService,
           authService,
-          serverState.jobQueue,
-          supervisor,
-          appMemCaches,
-        ) *> runHttpApp[F](serverState, authService, appConfig)
+          uuidLocal,
+        )
       }
+
+      appDeps.use(deps => HttpWorker.startWorkers[F](deps) *> runHttpApp[F](deps))
     }

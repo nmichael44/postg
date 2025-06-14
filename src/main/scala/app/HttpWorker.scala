@@ -9,10 +9,10 @@ import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
 import app.services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
-import app.AppConfig.BackendServerConfig
+import app.services.MovieRepositoryUtils.DBError
 import app.ImplicitConversions.*
-import app.JobSpecs.{FetchSystemUserError, JobKind, JobResult, LoginRequestError}
-import app.MovieApp.AppMemCaches
+import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult, LoginRequestError}
+import app.MovieApp.{AppDependencies, MemCaches}
 import app.Utils as U
 import org.typelevel.log4cats.Logger
 
@@ -20,6 +20,7 @@ object HttpWorker:
   final class Job[F[_]](
       val job: JobKind,
       val deferred: Deferred[F, Either[Throwable, JobResult]],
+      val uuid: String,
   )
 
   private final class JobExecutor[F[_]: { Async as async, Logger }](
@@ -29,17 +30,22 @@ object HttpWorker:
       serverStateUpdateService: ServerStateUpdateService[F],
       passwordHasherService: PasswordHasher[F],
       authService: AuthService[F],
-      appMemCaches: AppMemCaches[F],
+      memCaches: MemCaches[F],
+      uuidLocal: FLocal[F, Option[String]],
   ):
-    private val directorMemCache = appMemCaches.directorCache
-    private val actorMemCache = appMemCaches.actorCache
-    private val movieMemCache = appMemCaches.movieCache
+    private val directorMemCache = memCaches.directorCache
+    private val actorMemCache = memCaches.actorCache
+    private val movieMemCache = memCaches.movieCache
+
+    def setUUID(uuidOpt: Option[String]): F[Unit] = uuidLocal.set(uuidOpt)
+    def logi(s: String): F[Unit] = U.logi(uuidLocal, s)
+    def loge(e: Throwable, s: String): F[Unit] = U.loge(e, uuidLocal, s)
 
     private def getDirectorsDetailsByName(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.GetDirectorsDetailsByName]
       val (firstName, lastName) = (j.firstName, j.lastName)
 
-      U.logi("Fetching directors details by name") *>
+      logi("Fetching directors details by name") *>
         mr.getDirectorsDetails(firstName, lastName)
           .map(JobResult.DirectorsDetailsByNameResult.apply)
 
@@ -53,23 +59,23 @@ object HttpWorker:
     ): F[JobResult] =
       val (cacheEnabled, cache) = cacheDetails
       for {
-        _ <- U.logi(s"Fetching $itemName details for ID: $id")
+        _ <- logi(s"Fetching $itemName details for ID: $id")
         cashedItemOpt <- if cacheEnabled then cache.get(id) else async.pure(None)
         itemOpt <- cashedItemOpt match {
           case Some(item) =>
-            U.logi(s"$itemName details for ID: $id found in cache.").as(Some(item))
+            logi(s"$itemName details for ID: $id found in cache.").as(Some(item))
           case None =>
-            cacheEnabled.whenA(U.logi(s"$itemName details for ID: $id not found in cache.")) *>
-              U.logi(s"$itemName details for ID: $id Fetching from DB.") *>
+            cacheEnabled.whenA(logi(s"$itemName details for ID: $id not found in cache.")) *>
+              logi(s"$itemName details for ID: $id Fetching from DB.") *>
               f(NonEmptyVector.one(id)) >>= { itemDetailsMap =>
               itemDetailsMap.get(id) match {
                 case Some(item) =>
-                  U.logi(s"$itemName details for ID: $id found in DB.") *>
+                  logi(s"$itemName details for ID: $id found in DB.") *>
                     cacheEnabled
-                      .whenA(U.logi(s"Putting $itemName for ID: $id in cache.") *> cache.put(id, item, cachingDuration))
+                      .whenA(logi(s"Putting $itemName for ID: $id in cache.") *> cache.put(id, item, cachingDuration))
                       .as(Some(item))
                 case None =>
-                  U.logi(s"$itemName details for ID: $id not found in DB.").as(None)
+                  logi(s"$itemName details for ID: $id not found in DB.").as(None)
               }
             }
         }
@@ -92,7 +98,7 @@ object HttpWorker:
       val j = jk.asInstanceOf[JobKind.GetMoviesByDirector]
       val directorId = j.directorId
       for {
-        _ <- U.logi(s"Fetching movies for director ID: $directorId")
+        _ <- logi(s"Fetching movies for director ID: $directorId")
         moviesMap <- mr.getMoviesByDirectorId(NonEmptyVector.one(directorId))
       } yield JobResult.MoviesByDirectorResult(moviesMap.getOrElse(directorId, Seq.empty))
 
@@ -124,7 +130,7 @@ object HttpWorker:
 
       val movieId = j.movieId
       for {
-        _ <- U.logi(s"Fetching movie details for ID: $movieId")
+        _ <- logi(s"Fetching movie details for ID: $movieId")
         movieDetailsMap <- mr.getMovieDetails(NonEmptyVector.one(movieId))
       } yield JobResult.MovieDetailsResult(movieDetailsMap.get(movieId))
 
@@ -132,11 +138,11 @@ object HttpWorker:
       val j = jk.asInstanceOf[JobKind.GetMovieWithCounting]
       val movieId = j.movieId
       for {
-        _ <- U.logi(s"Fetching movie details for ID $movieId with counting.")
+        _ <- logi(s"Fetching movie details for ID $movieId with counting.")
         movieDetailsMap <- mr.getMovieDetails(NonEmptyVector.one(movieId))
         _ <- movieDetailsMap.nonEmpty.whenA(
           serverStateUpdateService.incrementAndGet(movieId) >>=
-            (newCounter => U.logi(s"Counter now is $newCounter")),
+            (newCounter => logi(s"Counter now is $newCounter")),
         )
       } yield JobResult.MovieWithCountingResult(movieDetailsMap.get(movieId))
 
@@ -144,27 +150,45 @@ object HttpWorker:
       val j = jk.asInstanceOf[JobKind.CreateMovie]
       val (title, year) = (j.title, j.year)
       for {
-        _ <- U.logi(s"Creating movie with title: '$title' and year: '$year'.")
+        _ <- logi(s"Creating movie with title: '$title' and year: '$year'.")
         movieId <- mr.createMovie(title, year)
       } yield JobResult.CreateMovieResult(movieId)
+
+    private def validatePassword(password: String): EitherT[F, CreateSystemUserError, String] =
+      PasswordValidator
+        .isPasswordGoodEnough(password)
+        .toEither
+        .leftMap(CreateSystemUserError.BadPassword.apply)
+        .toEitherT
 
     private def createSystemUser(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.CreateSystemUser]
       val userDetails = j.userDetails
       val (loginName, password) = (userDetails.loginName, userDetails.password)
 
-      for {
-        _ <- U.logi("Creating system user.")
-        hashedPassword <- passwordHasherService.hashPassword(password)
-        res <- mr.createSystemUser(loginName, hashedPassword)
-      } yield JobResult.CreateSystemUserResult(res)
+      val res: EitherT[F, CreateSystemUserError, Int] = for {
+        _ <- logi("Creating system user.").lift
+        _ <- logi("Checking password validity.").lift
+
+        validatedPassword <- validatePassword(password)
+
+        _ <- logi(s"Password is valid. Creating system user '$loginName'.").lift
+        hashedPassword <- passwordHasherService.hashPassword(validatedPassword).lift
+
+        userId <- mr
+          .createSystemUser(loginName, hashedPassword)
+          .toEitherT
+          .leftMap { case DBError.DuplicateLoginName(nm) => CreateSystemUserError.DuplicateLoginNameInDB(nm) }
+      } yield userId
+
+      res.value.map(JobResult.CreateSystemUserResult.apply)
 
     private def fetchSystemUserByLoginName(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.FetchSystemUserByLoginName]
       val loginName = j.loginName
 
       for {
-        _ <- U.logi("Fetching system user by loginName.")
+        _ <- logi("Fetching system user by loginName.")
         res <- mr.fetchSystemUserByLoginName(loginName).map(_.toRight(FetchSystemUserError.NotFound))
       } yield JobResult.FetchSystemUserByLoginNameResult(res)
 
@@ -173,7 +197,7 @@ object HttpWorker:
       val userIdStr = j.userIdStr
 
       for {
-        _ <- U.logi("Fetching system user by userId.")
+        _ <- logi("Fetching system user by userId.")
         res <- userIdStr.toIntOption.fold(async.pure(Left(FetchSystemUserError.BadInput))) { userId =>
           mr.fetchSystemUserByUserId(userId).map(_.toRight(FetchSystemUserError.NotFound))
         }
@@ -185,15 +209,13 @@ object HttpWorker:
       val (loginName, password) = (ud.loginName, ud.password)
 
       val res: EitherT[F, LoginRequestError, String] = for {
-        userDetails <- EitherT.fromOptionF(
-          mr.fetchSystemUserByLoginName(loginName),
-          LoginRequestError.InvalidLoginPassword,
-        )
-        _ <- EitherT
-          .liftF(passwordHasherService.checkPassword(password, userDetails.hashedPassword))
+        userDetails <- mr.fetchSystemUserByLoginName(loginName).toEitherT(LoginRequestError.InvalidLoginPassword)
+        _ <- passwordHasherService
+          .checkPassword(password, userDetails.hashedPassword)
+          .lift
           .ensure(LoginRequestError.InvalidLoginPassword)(identity) // If the password was wrong.
 
-        token <- EitherT.liftF(authService.createToken(userDetails, List("abc", "def")))
+        token <- authService.createToken(userDetails, List("silly", "permissions", "for", "now", "!")).lift
       } yield token
 
       res.value.map(JobResult.LoginRequestResult.apply)
@@ -221,54 +243,48 @@ object HttpWorker:
         .map(_(job))
         .getOrElse(async.raiseError(misingJobImplementationException(job)))
 
-  private def worker[F[_]: { Async as async, Logger as logger }](
-      workerId: Int,
+  private def createWorker[F[_]: { Async as async, Logger as logger }](
       queue: Queue[F, Job[F]],
       jobExecutor: JobExecutor[F],
   ): F[Nothing] =
-    val prompt = s"Worker '$workerId'"
-
     val processOneJob: F[Unit] = for {
-      _ <- logger.info(s"$prompt: Waiting for work.")
-      (job, deferred) <- queue.take.map(j => (j.job, j.deferred))
-      _ <- logger.info(s"$prompt: Starting to work on ${job.shortName}...")
-      outcome <- jobExecutor.executeJob(job).attempt
+      _ <- jobExecutor.logi("Waiting for work.")
+      (jobKind, deferred, uuid) <- queue.take.map(j => (j.job, j.deferred, j.uuid))
+      _ <- jobExecutor.setUUID(Some(uuid))
+      _ <- jobExecutor.logi(s"Starting to work on ${jobKind.shortName}...")
+      outcome <- jobExecutor.executeJob(jobKind).attempt
       // Finally, send the results back to the calling fiber.
-      _ <- logger.info(s"$prompt: Sending results back...")
+      _ <- jobExecutor.logi("Sending results back...")
       _ <- deferred.complete(outcome)
+      _ <- jobExecutor.setUUID(None)
     } yield ()
 
     val processOneJobSafely: F[Unit] = processOneJob.handleErrorWith { e =>
-      logger.error(e)(s"$prompt: Unhandled worker error. Restarting...") *>
+      jobExecutor.loge(e, "Unhandled worker error. Restarting...") *>
+        jobExecutor.setUUID(None) *>
         async.sleep(1.second)
     }
 
     processOneJobSafely.foreverM
 
-  def startWorkers[F[_]: { Async, Logger }](
-      backendServer: BackendServerConfig,
-      mr: MovieRepositoryService[F],
-      apiClient: ExternalApiClientService[F],
-      fileSystemService: FileSystemService[F],
-      serverStateUpdateService: ServerStateUpdateService[F],
-      passwordHasherService: PasswordHasher[F],
-      authService: AuthService[F],
-      queue: Queue[F, HttpWorker.Job[F]],
-      supervisor: Supervisor[F],
-      appMemCaches: AppMemCaches[F],
-  ): F[Unit] =
+  def startWorkers[F[_]: { Async, Logger }](deps: AppDependencies[F]): F[Unit] =
+    val serverState = deps.serverState
+
     val jobExecutor: JobExecutor[F] =
       JobExecutor(
-        mr,
-        apiClient,
-        fileSystemService,
-        serverStateUpdateService,
-        passwordHasherService,
-        authService,
-        appMemCaches,
+        deps.movieRepositoryService,
+        deps.externalApiClientService,
+        deps.fileSystemService,
+        deps.serverStateUpdateService,
+        deps.passwordHasherService,
+        deps.authService,
+        deps.memCaches,
+        deps.uuidLocal,
       )
 
-    val numberOfWorkers = backendServer.getNumberOfWorkers
+    val numberOfWorkers = deps.appConfig.getBackendServerConfig.getNumberOfWorkers
+    val worker = createWorker(serverState.jobQueue, jobExecutor)
+    val supervisor = deps.supervisor
     Vector
       .from(0 until numberOfWorkers)
-      .traverseVoid(workerId => supervisor.supervise(worker(workerId, queue, jobExecutor)))
+      .traverseVoid(_ => supervisor.supervise(worker))

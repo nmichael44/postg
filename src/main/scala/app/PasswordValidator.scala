@@ -1,10 +1,10 @@
 package app
 
-import cats.data.ValidatedNel
+import cats.data.{Chain, NonEmptyChain, NonEmptyVector, Validated, ValidatedNec, ValidatedNel}
 import cats.implicits.*
 
 object PasswordValidator:
-  private final val PasswordMinLen: Int = 8
+  inline private final val PasswordMinLen = 8
 
   private def hasCharWithProperty(pred: Char => Boolean, password: String): Boolean =
     password.exists(pred)
@@ -24,22 +24,35 @@ object PasswordValidator:
   private def hasSpecialChar(password: String): Boolean =
     hasCharWithProperty(c => !c.isLetterOrDigit, password)
 
-  private def validateLength(password: String): ValidatedNel[String, Unit] =
-    if isLongEnough(password) then ().validNel else "Password must be at least 8 characters.".invalidNel
+  private type ValidatedNec[E, A] = Validated[NonEmptyChain[E], A]
 
-  private def validateUpperCase(password: String): ValidatedNel[String, Unit] =
-    if hasUpperCase(password) then ().validNel else "Password must have uppercase characters.".invalidNel
+  extension [A](a: A)
+    private def validNec[E]: ValidatedNec[E, A] = Validated.Valid(a)
+    private def invalidNec[B]: ValidatedNec[A, B] = Validated.Invalid(NonEmptyChain.one(a))
 
-  private def validateLowerCase(password: String): ValidatedNel[String, Unit] =
-    if hasLowerCase(password) then ().validNel else "Password must have lowercase characters.".invalidNel
+  extension (t: Boolean)
+    private def valid[A, B](a: A, b: B): ValidatedNec[B, A] =
+      if t then a.validNec else b.invalidNec
 
-  private def validateDigit(password: String): ValidatedNel[String, Unit] =
-    if hasDigit(password) then ().validNel else "Password must have at least one digit.".invalidNel
+  private val ErrorStringForValidateLength: String =
+    s"Password must be at least $PasswordMinLen characters."
 
-  private def validateSpecialChar(password: String): ValidatedNel[String, Unit] =
-    if hasSpecialChar(password) then ().validNel else "Password must have at least one special character.".invalidNel
+  private def validateLength(password: String): ValidatedNec[String, Unit] =
+    isLongEnough(password).valid((), ErrorStringForValidateLength)
 
-  def isPasswordGoodEnough(password: String): ValidatedNel[String, String] =
+  private def validateUpperCase(password: String): ValidatedNec[String, Unit] =
+    hasUpperCase(password).valid((), "Password must have uppercase characters.")
+
+  private def validateLowerCase(password: String): ValidatedNec[String, Unit] =
+    hasLowerCase(password).valid((), "Password must have lowercase characters.")
+
+  private def validateDigit(password: String): ValidatedNec[String, Unit] =
+    hasDigit(password).valid((), "Password must have at least one digit.")
+
+  private def validateSpecialChar(password: String): ValidatedNec[String, Unit] =
+    hasSpecialChar(password).valid((), "Password must have at least one special character.")
+
+  def isPasswordGoodEnough(password: String): Validated[NonEmptyVector[String], String] =
     (
       validateLength(password),
       validateUpperCase(password),
@@ -47,3 +60,4 @@ object PasswordValidator:
       validateDigit(password),
       validateSpecialChar(password),
     ).mapN((_, _, _, _, _) => password)
+      .leftMap(_.toNonEmptyVector)

@@ -1,5 +1,7 @@
 package app
 
+import cats.data.NonEmptyVector
+
 import app.MovieDbModel.UserDetails
 import io.circe.Json
 
@@ -25,8 +27,9 @@ object JobSpecs:
   enum LoginRequestError:
     case InvalidLoginPassword
 
-  enum DBError:
-    case DuplicateLoginName(loginName: String)
+  enum CreateSystemUserError:
+    case DuplicateLoginNameInDB(loginName: String)
+    case BadPassword(errorList: NonEmptyVector[String])
 
   enum JobResult:
     case DirectorsDetailsByNameResult(directors: Seq[MovieDbModel.Director])
@@ -36,7 +39,7 @@ object JobSpecs:
     case MovieDetailsResult(movie: Option[MovieDbModel.Movie])
     case MovieWithCountingResult(movie: Option[MovieDbModel.Movie])
     case CreateMovieResult(movieId: Long)
-    case CreateSystemUserResult(res: Either[DBError, Int])
+    case CreateSystemUserResult(res: Either[CreateSystemUserError, Int])
     case FetchSystemUserByLoginNameResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
     case FetchSystemUserByUserIdResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
     case LoginRequestResult(res: Either[LoginRequestError, String])
