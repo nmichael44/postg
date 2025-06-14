@@ -566,15 +566,15 @@ object MovieApp:
       memCaches: MovieApp.MemCaches[F],
       supervisor: Supervisor[F],
       uuidGen: UUIDGenerator[F],
+      uuidLocal: FLocal[F, Option[String]],
 
-      // Add other services as needed
+      // The other services
       externalApiClientService: ExternalApiClientService[F],
       movieRepositoryService: MovieRepositoryService[F],
       fileSystemService: FileSystemService[F],
       serverStateUpdateService: ServerStateUpdateService[F],
       passwordHasherService: PasswordHasher[F],
       authService: AuthService[F],
-      uuidLocal: FLocal[F, Option[String]],
   )
 
   def run: IO[ExitCode] =
@@ -586,12 +586,12 @@ object MovieApp:
       val appDeps: Resource[F, AppDependencies[F]] = for {
         appConfig <- createConfigResource[F]()
         memCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
-        uuidLocal <- Resource.eval(FLocal.ioLocal[Option[String]](None))
         serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxHttpClientRedirects))
         supervisor <- Supervisor[F](await = false)
         xa <- DoobieObj.xaResource[F](appConfig.getDbConnectionConfig)
         uuidGen <- UUIDGenerator.create[F]
+        uuidLocal <- Resource.eval(FLocal.ioLocal[Option[String]](None))
       } yield {
         val externalApiClientService: ExternalApiClientService[F] = ExternalApiClientServiceLive.create[F](httpClient)
         val movieRepositoryService: MovieRepositoryService[F] = MovieRepositoryServiceLive.create[F](xa)
@@ -606,13 +606,13 @@ object MovieApp:
           memCaches,
           supervisor,
           uuidGen,
+          uuidLocal,
           externalApiClientService,
           movieRepositoryService,
           fileSystemService,
           serverStateUpdateService,
           passwordHasherService,
           authService,
-          uuidLocal,
         )
       }
 
