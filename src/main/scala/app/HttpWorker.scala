@@ -2,9 +2,8 @@ package app
 
 import cats.data.{EitherT, NonEmptyVector}
 import cats.effect.{Async, Deferred}
-import cats.effect.std.{Queue, Supervisor}
+import cats.effect.std.Queue
 import cats.syntax.all.*
-import cats.FlatMap
 
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
@@ -14,6 +13,7 @@ import app.services.MovieRepositoryUtils.DBError
 import app.ImplicitConversions.*
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult, LoginRequestError}
 import app.MovieApp.{AppDependencies, MemCaches}
+import app.TraceUtils.*
 import app.Utils as U
 import org.typelevel.log4cats.Logger
 
@@ -32,21 +32,19 @@ object HttpWorker:
       passwordHasherService: PasswordHasher[F],
       authService: AuthService[F],
       memCaches: MemCaches[F],
-      uuidLocal: FLocal[F, Option[String]],
+      val uuidScope: TraceIdScope[F, Option[String]],
   ):
     private val directorMemCache = memCaches.directorCache
     private val actorMemCache = memCaches.actorCache
     private val movieMemCache = memCaches.movieCache
 
-    def setUUID(uuidOpt: Option[String]): F[Unit] = uuidLocal.set(uuidOpt)
-
     private val WorkerFiberName = "Worker"
 
     def logi(s: String): F[Unit] =
-      uuidLocal.get >>= (uuidOpt => uuidOpt.fold(U.logi(WorkerFiberName, s))(U.logi(WorkerFiberName, _, s)))
+      uuidScope.get >>= (uuidOpt => uuidOpt.fold(U.logi(WorkerFiberName, s))(U.logi(WorkerFiberName, _, s)))
 
     def loge(e: Throwable, s: String): F[Unit] =
-      uuidLocal.get >>= (uuidOpt => uuidOpt.fold(U.loge(e, WorkerFiberName, s))(U.loge(e, WorkerFiberName, _, s)))
+      uuidScope.get >>= (uuidOpt => uuidOpt.fold(U.loge(e, WorkerFiberName, s))(U.loge(e, WorkerFiberName, _, s)))
 
     private def getDirectorsDetailsByName(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.GetDirectorsDetailsByName]
@@ -256,23 +254,32 @@ object HttpWorker:
   ): F[Nothing] =
     val processOneJob: F[Unit] = for {
       _ <- jobExecutor.logi("Waiting for work.")
-      (jobKind, deferred, uuid) <- queue.take.map(j => (j.job, j.deferred, j.uuid))
-      _ <- jobExecutor.setUUID(Some(uuid))
-      _ <- jobExecutor.logi(s"Starting to work on ${jobKind.shortName}...")
-      outcome <- jobExecutor.executeJob(jobKind).attempt
-      // Finally, send the results back to the calling fiber.
-      _ <- jobExecutor.logi("Done. Sending results back...")
-      _ <- deferred.complete(outcome)
-      _ <- jobExecutor.setUUID(None)
+      (job, deferred, uuid) <- queue.take.map(j => (j.job, j.deferred, j.uuid))
+      _ <- jobExecutor.uuidScope.scope(Some(uuid)).use { _ =>
+        val jobExecution = for {
+          _ <- jobExecutor.logi(s"Starting to work on ${job.shortName}...")
+          outcome <- jobExecutor.executeJob(job).attempt
+          _ <- jobExecutor.logi("Done. Sending results back...")
+          _ <- deferred.complete(outcome)
+        } yield ()
+
+        // Inner Handler: Catches errors for a specific job.
+        // It logs with the trace ID and allows the worker to continue immediately.
+        jobExecution.handleErrorWith { e =>
+          jobExecutor.loge(e, "Error while processing job. The job will be dropped.")
+        }
+      }
     } yield ()
 
-    val processOneJobSafely: F[Unit] = processOneJob.handleErrorWith { e =>
-      jobExecutor.loge(e, "Unhandled worker error. Restarting...") *>
-        jobExecutor.setUUID(None) *>
+    // Outer handler.
+    // This keeps the worker fiber from dying in case something happened outside the scope of the
+    // inner handler (for example, while waiting on the queue).
+    val processSafely = processOneJob.handleErrorWith { e =>
+      jobExecutor.loge(e, "A non-recoverable error occurred in the worker loop. Restarting....") *>
         async.sleep(1.second)
     }
 
-    processOneJobSafely.foreverM
+    processSafely.foreverM
 
   def startWorkers[F[_]: { Async, Logger }](deps: AppDependencies[F]): F[Unit] =
     val serverState = deps.serverState
@@ -286,7 +293,7 @@ object HttpWorker:
         deps.passwordHasherService,
         deps.authService,
         deps.memCaches,
-        deps.uuidLocal,
+        deps.uuidScope,
       )
 
     val numberOfWorkers = deps.appConfig.getBackendServerConfig.getNumberOfWorkers
