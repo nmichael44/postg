@@ -96,20 +96,14 @@ object Utils:
       .fromAutoCloseable(async.blocking(Source.fromFile(Paths.get(path).toFile)))
       .evalMap(source => async.blocking(source.mkString) >>= parseDatabaseConfig[F])
 
-  def logInfo[F[_]: Logger as logger](s: String): F[Unit] =
-    logger.info(s)
+  def logi[F[_]: Logger as logger](fiber: String, s: String): F[Unit] =
+    logger.info(s"$fiber :: $s")
 
-  def logError[F[_]: Logger as logger](e: Throwable, s: String): F[Unit] =
-    logger.error(e)(s)
+  def loge[F[_]: Logger as logger](e: Throwable, fiber: String, s: String): F[Unit] =
+    logger.error(e)(s"$fiber :: $s")
 
-  def logi[F[_]: Logger](uuid: String, s: String): F[Unit] =
-    logInfo(s"[$uuid] :: $s")
+  def logi[F[_]: Logger as logger](fiber: String, uuid: String, s: String): F[Unit] =
+    logger.info(s"$fiber [$uuid] :: $s")
 
-  def loge[F[_]: Logger](e: Throwable, uuid: String, s: String): F[Unit] =
-    logError(e, s"[$uuid] :: $s")
-
-  def logi[F[_]: { Logger, FlatMap }](uuidLocal: FLocal[F, Option[String]], s: String): F[Unit] =
-    uuidLocal.get >>= (uuidOpt => uuidOpt.fold(logInfo(s))(logi(_, s)))
-
-  def loge[F[_]: { Logger, FlatMap }](e: Throwable, uuidLocal: FLocal[F, Option[String]], s: String): F[Unit] =
-    uuidLocal.get >>= (uuidOpt => uuidOpt.fold(logError(e, s))(loge(e, _, s)))
+  def loge[F[_]: Logger as logger](e: Throwable, fiber: String, uuid: String, s: String): F[Unit] =
+    logger.error(e)(s"$fiber [$uuid] :: $s")

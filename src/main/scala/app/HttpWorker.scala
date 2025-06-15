@@ -4,6 +4,7 @@ import cats.data.{EitherT, NonEmptyVector}
 import cats.effect.{Async, Deferred}
 import cats.effect.std.{Queue, Supervisor}
 import cats.syntax.all.*
+import cats.FlatMap
 
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
@@ -38,8 +39,14 @@ object HttpWorker:
     private val movieMemCache = memCaches.movieCache
 
     def setUUID(uuidOpt: Option[String]): F[Unit] = uuidLocal.set(uuidOpt)
-    def logi(s: String): F[Unit] = U.logi(uuidLocal, s)
-    def loge(e: Throwable, s: String): F[Unit] = U.loge(e, uuidLocal, s)
+
+    private val WorkerFiberName = "Worker"
+
+    def logi(s: String): F[Unit] =
+      uuidLocal.get >>= (uuidOpt => uuidOpt.fold(U.logi(WorkerFiberName, s))(U.logi(WorkerFiberName, _, s)))
+
+    def loge(e: Throwable, s: String): F[Unit] =
+      uuidLocal.get >>= (uuidOpt => uuidOpt.fold(U.loge(e, WorkerFiberName, s))(U.loge(e, WorkerFiberName, _, s)))
 
     private def getDirectorsDetailsByName(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.GetDirectorsDetailsByName]
@@ -254,7 +261,7 @@ object HttpWorker:
       _ <- jobExecutor.logi(s"Starting to work on ${jobKind.shortName}...")
       outcome <- jobExecutor.executeJob(jobKind).attempt
       // Finally, send the results back to the calling fiber.
-      _ <- jobExecutor.logi("Sending results back...")
+      _ <- jobExecutor.logi("Done. Sending results back...")
       _ <- deferred.complete(outcome)
       _ <- jobExecutor.setUUID(None)
     } yield ()
