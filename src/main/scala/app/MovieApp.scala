@@ -592,21 +592,21 @@ object MovieApp:
   // specifies that it needs a redirection.
   inline private val MaxHttpClientRedirects = 5
 
-  final case class AppDependencies[F[_]](
-      appConfig: AppConfig,
-      serverState: ServerState[F],
-      memCaches: MovieApp.MemCaches[F],
-      supervisor: Supervisor[F],
-      uuidGen: UUIDGenerator[F],
-      uuidScope: TraceIdScope[F, Option[String]],
+  final class AppDependencies[F[_]](
+      val appConfig: AppConfig,
+      val serverState: ServerState[F],
+      val memCaches: MovieApp.MemCaches[F],
+      val supervisor: Supervisor[F],
+      val uuidGen: UUIDGenerator[F],
+      val uuidScope: TraceIdScope[F, Option[String]],
 
       // The other services
-      externalApiClientService: ExternalApiClientService[F],
-      movieRepositoryService: MovieRepositoryService[F],
-      fileSystemService: FileSystemService[F],
-      serverStateUpdateService: ServerStateUpdateService[F],
-      passwordHasherService: PasswordHasher[F],
-      authService: AuthService[F],
+      val externalApiClientService: ExternalApiClientService[F],
+      val movieRepositoryService: MovieRepositoryService[F],
+      val fileSystemService: FileSystemService[F],
+      val serverStateUpdateService: ServerStateUpdateService[F],
+      val passwordHasherService: PasswordHasher[F],
+      val authService: AuthService[F],
   )
 
   def run: IO[ExitCode] =
@@ -618,12 +618,12 @@ object MovieApp:
       val appDeps: Resource[F, AppDependencies[F]] = for {
         appConfig <- createConfigResource[F]()
         memCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
-        serverState <- Resource.eval(LiveServerState.create[F](appConfig.getBackendServerConfig))
+        serverState <- Resource.eval[F, ServerState[F]](LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxHttpClientRedirects))
         supervisor <- Supervisor[F](await = false)
         xa <- DoobieObj.xaResource[F](appConfig.getDbConnectionConfig)
         uuidGen <- UUIDGenerator.create[F]
-        uuidScope <- Resource.eval(TraceIdScope.fromIOLocal[Option[String]](None))
+        uuidScope <- Resource.eval[F, TraceIdScope[F, Option[String]]](TraceIdScope.fromIOLocal[Option[String]](None))
       } yield {
         val externalApiClientService: ExternalApiClientService[F] = ExternalApiClientServiceLive.create[F](httpClient)
         val movieRepositoryService: MovieRepositoryService[F] = MovieRepositoryServiceLive.create[F](xa)

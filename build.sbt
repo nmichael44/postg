@@ -1,6 +1,7 @@
 ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.7.1"
 
+val catsEffectVersion = "3.6.1"
 val postgresVersion = "42.7.7"
 val log4catsSlf4jVersion = "2.7.1"
 val logbackVersion = "1.5.18"
@@ -18,7 +19,7 @@ lazy val root = (project in file("."))
     name := "postg",
     scalacOptions ++= Seq("-deprecation", "-Xmax-inlines:64", "-language:strictEquality"),
     libraryDependencies ++= Seq(
-      "org.typelevel" %% "cats-effect" % "3.6.1",
+      "org.typelevel" %% "cats-effect" % catsEffectVersion,
       "org.postgresql" % "postgresql" % postgresVersion,
       "org.tpolecat" %% "doobie-core" % doobieVersion,
       "org.tpolecat" %% "doobie-postgres" % doobieVersion,
