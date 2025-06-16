@@ -11,7 +11,7 @@ import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
 import app.serviceslive.{AuthServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
-import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig}
+import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig, ServerConnectionConfig}
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult}
@@ -101,7 +101,7 @@ object MovieApp:
       ApiError(wsr.asInstanceOf[BadRequestRes].e, "BADREQUEST") >>= (apiErr => BadRequest(apiErr))
 
     private def unauthorizedToResponse(wsr: WebServiceResult): F[Response[F]] =
-      ApiError(wsr.asInstanceOf[BadRequestRes].e, "UNAUTHORIZED") >>= { apiErr =>
+      ApiError(wsr.asInstanceOf[UnauthorizedRes].e, "UNAUTHORIZED") >>= { apiErr =>
         Unauthorized(`WWW-Authenticate`(ErrorChallenge), apiErr)
       }
 
@@ -487,9 +487,8 @@ object MovieApp:
       ),
     )
 
-  private def getServerHostIPPort(appConfig: AppConfig): (Ipv4Address, Port) =
-    val serverConnection = appConfig.getServerConnectionConfig
-    val (host, port) = (serverConnection.getHost, serverConnection.getPort)
+  private def getServerHostIPPort(serverConnectionConfig: ServerConnectionConfig): (Ipv4Address, Port) =
+    val (host, port) = (serverConnectionConfig.getHost, serverConnectionConfig.getPort)
 
     (Ipv4Address.fromString(host), Port.fromInt(port)) match {
       case (Some(ipv4Address), Some(port)) => (ipv4Address, port)
@@ -555,18 +554,20 @@ object MovieApp:
       ),
     )
 
-  private val keyStorePassword: Array[Char] = "hgt67Y3!l9".toCharArray
-  private val keyStore = java.nio.file.Paths.get("certs/keystore.p12")
-
   private def createServerResource[F[_]: { Async, Network }](
       serverHostIP: Ipv4Address,
       serverHostPort: Port,
+      keyStoreFile: String,
+      keyStorePassword: String,
       httpApp: HttpApp[F],
   ): Resource[F, http4s.server.Server] =
+    val keyStoreFileNio = java.nio.file.Paths.get(keyStoreFile)
+    val keyStorePasswordArray = keyStorePassword.toCharArray
+
     Resource.eval(
       TLSContext.Builder
         .forAsync[F]
-        .fromKeyStoreFile(keyStore, keyStorePassword, keyStorePassword),
+        .fromKeyStoreFile(keyStoreFileNio, keyStorePasswordArray, keyStorePasswordArray),
     ) >>= { tlsContext =>
       EmberServerBuilder
         .default[F]
@@ -581,12 +582,21 @@ object MovieApp:
   private def runHttpApp[F[_]: { Async as async, Network, Logger }](deps: AppDependencies[F]): F[ExitCode] =
     val dsl: Http4sDsl[F] = Http4sDsl[F]
     val render: Render[F] = Render(dsl)
-    val (serverHostIP, serverHostPort) = getServerHostIPPort(deps.appConfig)
+    val serverConnectionConfig = deps.appConfig.getServerConnectionConfig
+    val (serverHostIP, serverHostPort) = getServerHostIPPort(serverConnectionConfig)
+    val keyStoreFile = serverConnectionConfig.getKeyStoreFile
+    val keyStorePassword = serverConnectionConfig.getKeyStorePassword
+
     val httpApp: HttpApp[F] = allRoutes[F](deps, dsl, render)
 
-    createServerResource(serverHostIP, serverHostPort, httpApp)
+    createServerResource(serverHostIP, serverHostPort, keyStoreFile, keyStorePassword, httpApp)
       .use(server => U.logi("MainFiber", s"Server started with base uri: '${server.baseUri.toString}'.") *> async.never)
       .as(ExitCode.Success)
+
+  private def createLogger[F[_]: Async as async]: F[Logger[F]] =
+    val movieAppLoggerName = LoggerName("MovieAppLogger")
+
+    Slf4jLogger.create[F](using async, movieAppLoggerName).widen[Logger[F]]
 
   // This is the number of redirects Ember will perform when a response
   // specifies that it needs a redirection.
@@ -608,11 +618,6 @@ object MovieApp:
       val passwordHasherService: PasswordHasher[F],
       val authService: AuthService[F],
   )
-
-  private def createLogger[F[_]: Async as async]: F[Logger[F]] =
-    val movieAppLoggerName = LoggerName("MovieAppLogger")
-
-    Slf4jLogger.create[F](using async, movieAppLoggerName).widen[Logger[F]]
 
   def run: IO[ExitCode] =
     type F = IO

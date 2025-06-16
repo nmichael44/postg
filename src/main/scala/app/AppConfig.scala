@@ -25,9 +25,13 @@ object AppConfig:
   final case class ServerConnectionConfig(
       private val host: String,
       private val port: Port,
+      private val keyStoreFile: String,
+      private val keyStorePassword: String,
   ) derives ConfigReader:
     def getHost: String = host
     def getPort: Int = port.port
+    def getKeyStoreFile: String = keyStoreFile
+    def getKeyStorePassword: String = keyStorePassword
 
   final case class BackendServerConfig(
       private val numberOfWorkers: Int,
