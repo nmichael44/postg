@@ -36,7 +36,7 @@ import org.http4s.headers.{`WWW-Authenticate`, Authorization}
 import org.http4s.implicits.*
 import org.http4s.server.{AuthMiddleware, Router}
 import org.typelevel.ci.CIString
-import org.typelevel.log4cats.{Logger, LoggerName, StructuredLogger}
+import org.typelevel.log4cats.{Logger, LoggerName}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
 import services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
@@ -173,7 +173,7 @@ object MovieApp:
       ctxReq: ContextRequest[F, AuthenticatedUser],
       uuidGen: UUIDGenerator[F],
       directorPath: DirectorPath,
-  ): F[WebServiceResult] = {
+  ): F[WebServiceResult] =
     val req: Request[F] = ctxReq.req
     ensureOnlyAllowedParams(allowedParamsForGetDirectors, req)
       .getOrElse {
@@ -185,7 +185,6 @@ object MovieApp:
           dirs => WebServiceResult.OkJsonRes(dirs.asJson),
         )
       }
-  }
 
   private def getDirectorDetails[F[_]: { Async, Logger as logger }](
       serverState: ServerState[F],
