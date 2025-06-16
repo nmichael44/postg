@@ -612,9 +612,7 @@ object MovieApp:
   private def createLogger[F[_]: Async as async]: F[Logger[F]] =
     val movieAppLoggerName = LoggerName("MovieAppLogger")
 
-    Slf4jLogger
-      .create[F](using async, movieAppLoggerName)
-      .map(_.asInstanceOf[Logger[F]])
+    Slf4jLogger.create[F](using async, movieAppLoggerName).widen[Logger[F]]
 
   def run: IO[ExitCode] =
     type F = IO
