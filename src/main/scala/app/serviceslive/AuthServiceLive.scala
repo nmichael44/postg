@@ -24,7 +24,7 @@ private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: Aut
   private val JwtDecodingAlgorithmList: Seq[JwtHmacAlgorithm] = Seq(JwtEncodingAlgorithm)
 
   override def createToken(user: UserDetailsInDb, permissions: Seq[String]): F[String] =
-    sync.blocking:
+    sync.blocking {
       val userId = user.userId
       val nowEpochSec = Instant.now(clock).getEpochSecond
       val expiryEpochSec = nowEpochSec + authConfig.getExpirationPeriodInSecond
@@ -46,12 +46,14 @@ private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: Aut
       )
 
       JwtCirce.encode(claim, authConfig.getSecretKey, JwtEncodingAlgorithm)
+    }
 
   override def validateToken(token: String): F[Either[Throwable, AuthenticatedUser]] =
-    sync.blocking:
+    sync.blocking {
       JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither >>= { jwtClaim =>
         decode[AuthenticatedUser](jwtClaim.content)
       }
+    }
 
 object AuthServiceLive:
   def create[F[_]: Sync](authConfig: AuthConfig, clock: Clock): AuthService[F] =
