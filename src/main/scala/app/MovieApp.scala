@@ -16,7 +16,6 @@ import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobRe
 import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult}
 import app.MovieDbModel.DirectorPath
-import app.TraceUtils.*
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
 import fs2.io.net.Network

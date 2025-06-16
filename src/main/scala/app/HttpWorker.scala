@@ -13,7 +13,6 @@ import app.services.MovieRepositoryUtils.DBError
 import app.ImplicitConversions.*
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult, LoginRequestError}
 import app.MovieApp.{AppDependencies, MemCaches}
-import app.TraceUtils.*
 import app.Utils as U
 import org.typelevel.log4cats.Logger
 
