@@ -40,7 +40,7 @@ import org.typelevel.log4cats.{Logger, LoggerName}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
 import services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
-import AuthUtils.AuthenticatedUser
+import MovieDbModel.AuthenticatedUser
 
 object MovieApp:
   private[app] final case class LiveServerState[F[_]](

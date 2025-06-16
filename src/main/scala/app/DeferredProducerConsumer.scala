@@ -8,7 +8,7 @@ import cats.syntax.all.*
 import org.typelevel.log4cats.Logger
 
 object DeferredProducerConsumer:
-  private final case class JobToDo(n: Int)
+  private final class JobToDo(n: Int)
 
   private def createProducer[F[_]: Async](d: Deferred[F, JobToDo], job: JobToDo): F[Unit] =
     d.complete(job).void

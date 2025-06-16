@@ -7,8 +7,8 @@ import java.time.{Clock, Instant}
 
 import app.services.AuthService
 import app.AppConfig.AuthConfig
-import app.AuthUtils.AuthenticatedUser
 import app.ImplicitConversions.*
+import app.MovieDbModel.AuthenticatedUser
 import app.MovieDbModel.UserDetailsInDb
 import io.circe.*
 import io.circe.generic.auto.*

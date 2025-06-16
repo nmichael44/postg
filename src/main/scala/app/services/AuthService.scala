@@ -1,7 +1,6 @@
 package app.services
 
-import app.AuthUtils.AuthenticatedUser
-import app.MovieDbModel.UserDetailsInDb
+import app.MovieDbModel.{AuthenticatedUser, UserDetailsInDb}
 
 trait AuthService[F[_]]:
   def createToken(user: UserDetailsInDb, permissions: Seq[String]): F[String]

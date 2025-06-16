@@ -36,3 +36,5 @@ object MovieDbModel:
   final case class UserDetails(loginName: String, password: String)
 
   final case class UserDetailsInDb(userId: Int, loginName: String, hashedPassword: String)
+
+  final case class AuthenticatedUser(userId: Long, permissions: Set[String], issuedAt: Long, expiresAt: Long)

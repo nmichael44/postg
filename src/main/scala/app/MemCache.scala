@@ -9,6 +9,7 @@ import cats.implicits.*
 import java.time.Instant
 import scala.collection.immutable.{TreeMap, TreeSet}
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 import app.MemCache.{hasExpired, CacheElem, CacheState}
 import org.typelevel.log4cats.Logger
@@ -45,7 +46,6 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
     putAux(k, v, None)
 
   def put(k: K, v: V, duration: FiniteDuration): F[Unit] =
-    import scala.jdk.DurationConverters.ScalaDurationOps
     put(k, v, duration.toJava)
 
   def put(k: K, v: V, duration: java.time.Duration): F[Unit] =
