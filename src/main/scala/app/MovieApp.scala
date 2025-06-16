@@ -18,6 +18,7 @@ import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSyst
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
+import fs2.io.net.tls.*
 import fs2.io.net.Network
 import io.circe.*
 import io.circe.generic.auto.*
@@ -36,7 +37,7 @@ import org.http4s.headers.{`WWW-Authenticate`, Authorization}
 import org.http4s.implicits.*
 import org.http4s.server.{AuthMiddleware, Router}
 import org.typelevel.ci.CIString
-import org.typelevel.log4cats.{Logger, LoggerName}
+import org.typelevel.log4cats.{Logger, LoggerName, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
 import services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
@@ -192,9 +193,8 @@ object MovieApp:
       uuidGen: UUIDGenerator[F],
       directorId: Long,
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
     jobHandler[F, DirectorDetailsResult](
-      req,
+      ctxReq.req,
       serverState,
       uuidGen,
       GetDirectorDetails(directorId),
@@ -207,9 +207,8 @@ object MovieApp:
       uuidGen: UUIDGenerator[F],
       actorId: Long,
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
     jobHandler[F, ActorDetailsResult](
-      req,
+      ctxReq.req,
       serverState,
       uuidGen,
       GetActorDetails(actorId),
@@ -236,9 +235,8 @@ object MovieApp:
       uuidGen: UUIDGenerator[F],
       directorId: Long,
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
     jobHandler[F, MoviesByDirectorResult](
-      req,
+      ctxReq.req,
       serverState,
       uuidGen,
       GetMoviesByDirector(directorId),
@@ -251,9 +249,8 @@ object MovieApp:
       uuidGen: UUIDGenerator[F],
       movieId: Long,
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
     jobHandler[F, MovieDetailsResult](
-      req,
+      ctxReq.req,
       serverState,
       uuidGen,
       GetMovie(movieId),
@@ -266,9 +263,8 @@ object MovieApp:
       uuidGen: UUIDGenerator[F],
       movieId: Long,
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
     jobHandler[F, MovieWithCountingResult](
-      req,
+      ctxReq.req,
       serverState,
       uuidGen,
       GetMovieWithCounting(movieId),
@@ -284,9 +280,8 @@ object MovieApp:
       title: String,
       year: Int,
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
     jobHandler[F, CreateMovieResult](
-      req,
+      ctxReq.req,
       serverState,
       uuidGen,
       CreateMovie(title, year),
@@ -326,8 +321,7 @@ object MovieApp:
       ctxReq: ContextRequest[F, AuthenticatedUser],
       uuidGen: UUIDGenerator[F],
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
-    createSystemUser(serverState, req, uuidGen)
+    createSystemUser(serverState, ctxReq.req, uuidGen)
 
   def fetchSystemUserByLoginName[F[_]: { Async, Logger }](
       serverState: ServerState[F],
@@ -335,9 +329,8 @@ object MovieApp:
       uuidGen: UUIDGenerator[F],
       loginName: String,
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
     jobHandler[F, FetchSystemUserByLoginNameResult](
-      req,
+      ctxReq.req,
       serverState,
       uuidGen,
       FetchSystemUserByLoginName(loginName),
@@ -355,9 +348,8 @@ object MovieApp:
       uuidGen: UUIDGenerator[F],
       userIdStr: String,
   ): F[WebServiceResult] =
-    val req: Request[F] = ctxReq.req
     jobHandler[F, FetchSystemUserByUserIdResult](
-      req,
+      ctxReq.req,
       serverState,
       uuidGen,
       FetchSystemUserByUserId(userIdStr),
@@ -563,27 +555,37 @@ object MovieApp:
       ),
     )
 
-  private def createServerResource[F[_]: { Async, Network, Logger }](
+  private val keyStorePassword: Array[Char] = "hgt67Y3!l9".toCharArray
+  private val keyStore = java.nio.file.Paths.get("certs/keystore.p12")
+
+  private def createServerResource[F[_]: { Async, Network }](
       serverHostIP: Ipv4Address,
       serverHostPort: Port,
       httpApp: HttpApp[F],
   ): Resource[F, http4s.server.Server] =
-    EmberServerBuilder
-      .default[F]
-      .withHost(serverHostIP)
-      .withPort(serverHostPort)
-      .withShutdownTimeout(5.seconds)
-      .withHttpApp(httpApp)
-      .build
+    Resource.eval(
+      TLSContext.Builder
+        .forAsync[F]
+        .fromKeyStoreFile(keyStore, keyStorePassword, keyStorePassword),
+    ) >>= { tlsContext =>
+      EmberServerBuilder
+        .default[F]
+        .withHost(serverHostIP)
+        .withPort(serverHostPort)
+        .withShutdownTimeout(5.seconds)
+        .withHttpApp(httpApp)
+        .withTLS(tlsContext)
+        .build
+    }
 
-  private def runHttpApp[F[_]: { Async, Network, Logger }](deps: AppDependencies[F]): F[ExitCode] =
+  private def runHttpApp[F[_]: { Async as async, Network, Logger }](deps: AppDependencies[F]): F[ExitCode] =
     val dsl: Http4sDsl[F] = Http4sDsl[F]
     val render: Render[F] = Render(dsl)
     val (serverHostIP, serverHostPort) = getServerHostIPPort(deps.appConfig)
     val httpApp: HttpApp[F] = allRoutes[F](deps, dsl, render)
 
     createServerResource(serverHostIP, serverHostPort, httpApp)
-      .use(server => U.logi("MainFiber", s"Server started with base uri: '${server.baseUri.toString}'.") *> Async[F].never)
+      .use(server => U.logi("MainFiber", s"Server started with base uri: '${server.baseUri.toString}'.") *> async.never)
       .as(ExitCode.Success)
 
   // This is the number of redirects Ember will perform when a response
@@ -607,12 +609,17 @@ object MovieApp:
       val authService: AuthService[F],
   )
 
+  private def createLogger[F[_]: Async as async]: F[Logger[F]] =
+    val movieAppLoggerName = LoggerName("MovieAppLogger")
+
+    Slf4jLogger
+      .create[F](using async, movieAppLoggerName)
+      .map(_.asInstanceOf[Logger[F]])
+
   def run: IO[ExitCode] =
     type F = IO
 
-    implicit val MovieAppLoggerName: LoggerName = LoggerName("MovieAppLogger")
-
-    Slf4jLogger.create[F] >>= { implicit logger =>
+    createLogger[F] >>= { implicit logger =>
       val appDeps: Resource[F, AppDependencies[F]] = for {
         appConfig <- createConfigResource[F]()
         memCaches <- createMemCaches[F](appConfig.getMemCacheConfig)

@@ -1,13 +1,13 @@
 Create User:
 ============
-curl -X POST -H "Content-Type: application/json" -d '{"loginName":"neo", "password":"fake_password"}' http://localhost:8080/createSystemUser
+curl -k -X POST -H "Content-Type: application/json" -d '{"loginName":"neo", "password":"fake_password"}' https://localhost:443/createSystemUser
 
 Get Token:
 =============
-curl -X POST -H "Content-Type: application/json" -d '{"loginName":"neo", "password":"fake_password"}' http://localhost:8080/login
+curl -k -X POST -H "Content-Type: application/json" -d '{"loginName":"neo", "password":"fake_password"}' https://localhost:443/login
 
-curl -X POST -H "Content-Type: application/json" -H "X-Request-ID: <your-unique-uuid-here>" -d '{"loginName":"neo", "password":"fake_password"}' http://localhost:8080/login
+curl -k -X POST -H "Content-Type: application/json" -H "X-Request-ID: <your-unique-uuid-here>" -d '{"loginName":"neo", "password":"fake_password"}' https://localhost:443/login
 
 Use Token:
 ==========
-curl -X GET -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJuZW8tYXBwIiwic3ViIjoiOCIsImlhdCI6MTc0OTU0MTA4NSwiZXhwIjoxNzQ5NTQ0Njg1LCJ1c2VySWQiOjgsImlzc3VlZEF0IjoxNzQ5NTQxMDg1LCJleHBpcmVzQXQiOjE3NDk1NDQ2ODUsInBlcm1pc3Npb25zIjpbImFiYyIsImRlZiJdfQ.I0c81X1L_GmF9CLRoK6uwn_KXKRLdZu2PFJuxty8Fy4" http://localhost:8080/api/getDirector/0
+curl -k -X GET -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJuZW8tYXBwIiwic3ViIjoiOCIsImlhdCI6MTc0OTU0MTA4NSwiZXhwIjoxNzQ5NTQ0Njg1LCJ1c2VySWQiOjgsImlzc3VlZEF0IjoxNzQ5NTQxMDg1LCJleHBpcmVzQXQiOjE3NDk1NDQ2ODUsInBlcm1pc3Npb25zIjpbImFiYyIsImRlZiJdfQ.I0c81X1L_GmF9CLRoK6uwn_KXKRLdZu2PFJuxty8Fy4" https://localhost:443/api/getDirector/0
