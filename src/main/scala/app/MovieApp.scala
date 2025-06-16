@@ -598,7 +598,7 @@ object MovieApp:
       val uuidGen: UUIDGenerator[F],
       val uuidScope: TraceIdScope[F, Option[String]],
 
-      // The other services
+      // The services
       val externalApiClientService: ExternalApiClientService[F],
       val movieRepositoryService: MovieRepositoryService[F],
       val fileSystemService: FileSystemService[F],
