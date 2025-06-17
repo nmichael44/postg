@@ -299,6 +299,7 @@ object HttpWorker:
     val numberOfWorkers = deps.appConfig.getBackendServerConfig.getNumberOfWorkers
     val worker = createWorker(serverState.jobQueue, jobExecutor)
     val supervisor = deps.supervisor
+
     Vector
       .from(0 until numberOfWorkers)
       .traverseVoid(_ => supervisor.supervise(worker))

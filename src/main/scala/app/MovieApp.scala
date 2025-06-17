@@ -4,6 +4,7 @@ import cats.data.{EitherT, Kleisli, OptionT}
 import cats.effect.*
 import cats.effect.kernel.{Async, Resource}
 import cats.effect.std.{Queue, Supervisor}
+import cats.effect.std.Env
 import cats.syntax.all.*
 import cats.Applicative
 
@@ -543,16 +544,26 @@ object MovieApp:
       createMovieMemCache(mcc.getMovieMemCacheConfig).tupleLeft(mcc.getMovieMemCacheConfig.getCacheEnabled),
     ).mapN((d, a, m) => MemCaches[F](d, a, m))
 
-  private def createConfigResource[F[_]: { Async as async }]() =
-    Resource.eval[F, AppConfig](
-      async.fromEither(
-        ConfigSource.default
+  private def createConfigResource[F[_]: { Async as async, Env as env, Logger }]: Resource[F, AppConfig] =
+    val loadConfig = for {
+      appEnvOpt <- env.get("APP_ENV")
+      env = appEnvOpt.getOrElse("dev")
+      _ <- async.whenA(env != "dev" && env != "prod")(
+        async.raiseError(AssertionError(s"Bad configuration environment: '$env'.")),
+      )
+      config <- async.fromEither(
+        ConfigSource
+          .resources(s"application-$env.conf")
+          .withFallback(ConfigSource.resources("application.conf"))
           .at("app-config")
           .load[AppConfig]
           .left
           .map(pureconfig.error.ConfigReaderException[AppConfig]),
-      ),
-    )
+      )
+      _ <- U.logi("MainFiber", config.toString)
+    } yield config
+
+    Resource.eval(loadConfig)
 
   private def createServerResource[F[_]: { Async, Network }](
       serverHostIP: Ipv4Address,
@@ -624,7 +635,7 @@ object MovieApp:
 
     createLogger[F] >>= { implicit logger =>
       val appDeps: Resource[F, AppDependencies[F]] = for {
-        appConfig <- createConfigResource[F]()
+        appConfig <- createConfigResource[F]
         memCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
         serverState <- Resource.eval[F, ServerState[F]](LiveServerState.create[F](appConfig.getBackendServerConfig))
         httpClient <- EmberClientBuilder.default[F].build.map(FollowRedirect[F](MaxHttpClientRedirects))
