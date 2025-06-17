@@ -217,7 +217,8 @@ object HttpWorker:
         _ <- passwordHasherService
           .checkPassword(password, userDetails.hashedPassword)
           .lift
-          .ensure(LoginRequestError.InvalidLoginPassword)(identity) // If the password was wrong.
+          .ensure(LoginRequestError.InvalidLoginPassword)(identity)
+          .biSemiflatTap(_ => logi("Login failed. Invalid password!"), _ => logi("Login was successful!"))
 
         token <- authService.createToken(userDetails, List("silly", "permissions", "for", "now", "!")).lift
       } yield token
