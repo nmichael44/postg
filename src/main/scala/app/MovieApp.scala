@@ -595,8 +595,8 @@ object MovieApp:
     val render: Render[F] = Render(dsl)
     val serverConnectionConfig = deps.appConfig.getServerConnectionConfig
     val (serverHostIP, serverHostPort) = getServerHostIPPort(serverConnectionConfig)
-    val keyStoreFile = serverConnectionConfig.getKeyStoreFile
-    val keyStorePassword = serverConnectionConfig.getKeyStorePassword
+    val keyStoreFile = serverConnectionConfig.getKeystoreFile
+    val keyStorePassword = serverConnectionConfig.getKeystorePassword
 
     val httpApp: HttpApp[F] = allRoutes[F](deps, dsl, render)
 
