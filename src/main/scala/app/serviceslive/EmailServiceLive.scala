@@ -25,16 +25,3 @@ object EmailServiceLive:
     val mailer = myEmil(mailConf)
 
     EmailServiceLive(mailer)
-
-//createConfigResource[IO].use { config =>
-//  val ms = EmailServiceLive.create[IO](config.getGmailConfig)
-//  val email = MailBuilder(
-//    From[IO](MailAddress.unsafe(None, "nmichael@gmail.com")),
-//    To[IO](MailAddress.unsafe(None, "nmichael@yahoo.com")),
-//    Cc[IO](MailAddress.unsafe(None, "nmichael@gmail.com")),
-//    Subject[IO]("First email"),
-//    TextBody[IO]("Hi there, this is Neo's program saying hello..."),
-//  ).build
-//
-//  ms.sendEmail(NonEmptyList.of(email, email, email)).as(ExitCode.Success)
-//}
