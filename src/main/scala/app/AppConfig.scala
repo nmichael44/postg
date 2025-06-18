@@ -85,6 +85,13 @@ object AppConfig:
     def getExpirationPeriodInSecond: Long = expirationPeriodInSeconds
     def getJwtEncodingAlgorithm: String = jwtEncodingAlgorithm
 
+  final case class GMailConfig(
+      private val emailUser: String,
+      private val emailUserPassword: String,
+  ):
+    def getEmailUser: String = emailUser
+    def getEmailUserPassword: String = emailUserPassword
+
   final case class AppConfig(
       private val name: String,
       private val dbConnectionConfig: DbConnectionConfig,
@@ -92,12 +99,14 @@ object AppConfig:
       private val backendServerConfig: BackendServerConfig,
       private val memCacheConfig: MemCacheConfig,
       private val authConfig: AuthConfig,
+      private val gmailConfig: GMailConfig,
   ) derives ConfigReader:
     def getDbConnectionConfig: DbConnectionConfig = dbConnectionConfig
     def getServerConnectionConfig: ServerConnectionConfig = serverConnectionConfig
     def getBackendServerConfig: BackendServerConfig = backendServerConfig
     def getMemCacheConfig: MemCacheConfig = memCacheConfig
     def getAuthConfig: AuthConfig = authConfig
+    def getGmailConfig: GMailConfig = gmailConfig
 
   final case class Port(port: Int) extends AnyVal
 

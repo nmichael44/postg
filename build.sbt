@@ -13,6 +13,7 @@ val pureConfigCoreVersion = "0.17.9"
 val catsEffectTestingScalatestVersion = "1.6.0"
 val jwtCirceVersion = "10.0.4"
 val password4jVersion = "1.8.3"
+val emilVersion = "0.19.0"
 
 lazy val root = (project in file("."))
   .settings(
@@ -38,6 +39,8 @@ lazy val root = (project in file("."))
       "ch.qos.logback" % "logback-classic" % logbackVersion % Runtime,
       "com.github.jwt-scala" %% "jwt-circe" % jwtCirceVersion,
       "com.password4j" % "password4j" % password4jVersion,
+      "com.github.eikek" %% "emil-common" % emilVersion,
+      "com.github.eikek" %% "emil-javamail" % emilVersion,
       "org.typelevel" %% "cats-effect-testing-scalatest" % catsEffectTestingScalatestVersion % Test,
       "org.scalatest" %% "scalatest" % scalatestVersion % Test,
     ),

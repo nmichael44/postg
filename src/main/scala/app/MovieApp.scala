@@ -11,7 +11,7 @@ import cats.Applicative
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
-import app.serviceslive.{AuthServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
+import app.serviceslive.{AuthServiceLive, EmailServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig, ServerConnectionConfig}
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest}
@@ -41,7 +41,7 @@ import org.typelevel.ci.CIString
 import org.typelevel.log4cats.{Logger, LoggerName, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
-import services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
+import services.{AuthService, EmailService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
 import MovieDbModel.AuthenticatedUser
 
 object MovieApp:
@@ -544,11 +544,15 @@ object MovieApp:
       createMovieMemCache(mcc.getMovieMemCacheConfig).tupleLeft(mcc.getMovieMemCacheConfig.getCacheEnabled),
     ).mapN((d, a, m) => MemCaches[F](d, a, m))
 
+  private val MainFiberName: String = "MainFiber"
+
+  private val AppEnvs: Set[String] = Set("dev", "prod")
+
   private def createConfigResource[F[_]: { Async as async, Env as env, Logger }]: Resource[F, AppConfig] =
     val loadConfig = for {
       appEnvOpt <- env.get("APP_ENV")
       env = appEnvOpt.getOrElse("dev")
-      _ <- async.whenA(env != "dev" && env != "prod")(
+      _ <- async.whenA(!AppEnvs.contains(env))(
         async.raiseError(AssertionError(s"Bad configuration environment: '$env'.")),
       )
       config <- async.fromEither(
@@ -560,7 +564,7 @@ object MovieApp:
           .left
           .map(pureconfig.error.ConfigReaderException[AppConfig]),
       )
-      _ <- U.logi("MainFiber", config.toString)
+      _ <- U.logi(MainFiberName, config.toString)
     } yield config
 
     Resource.eval(loadConfig)
@@ -601,7 +605,7 @@ object MovieApp:
     val httpApp: HttpApp[F] = allRoutes[F](deps, dsl, render)
 
     createServerResource(serverHostIP, serverHostPort, keyStoreFile, keyStorePassword, httpApp)
-      .use(server => U.logi("MainFiber", s"Server started with base uri: '${server.baseUri.toString}'.") *> async.never)
+      .use(server => U.logi(MainFiberName, s"Server started with base uri: '${server.baseUri.toString}'.") *> async.never)
       .as(ExitCode.Success)
 
   private def createLogger[F[_]: Async as async]: F[Logger[F]] =
@@ -628,6 +632,7 @@ object MovieApp:
       val serverStateUpdateService: ServerStateUpdateService[F],
       val passwordHasherService: PasswordHasher[F],
       val authService: AuthService[F],
+      val emailService: EmailService[F],
   )
 
   def run: IO[ExitCode] =
@@ -650,6 +655,7 @@ object MovieApp:
         val serverStateUpdateService: ServerStateUpdateService[F] = ServerStateUpdateServiceLive.create[F](serverState)
         val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create[F]
         val authService: AuthService[F] = AuthServiceLive.create[F](appConfig.getAuthConfig, java.time.Clock.systemUTC())
+        val emailService: EmailService[F] = EmailServiceLive.create(appConfig.getGmailConfig)
 
         AppDependencies(
           appConfig,
@@ -664,6 +670,7 @@ object MovieApp:
           serverStateUpdateService,
           passwordHasherService,
           authService,
+          emailService,
         )
       }
 
