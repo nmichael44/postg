@@ -1,6 +1,7 @@
 package app.services
 
 import cats.data.NonEmptyList
+
 import emil.*
 
 trait EmailService[F[_]]:

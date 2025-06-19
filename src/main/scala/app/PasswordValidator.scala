@@ -3,6 +3,8 @@ package app
 import cats.data.{Chain, NonEmptyChain, NonEmptyVector, Validated, ValidatedNec, ValidatedNel}
 import cats.implicits.*
 
+import app.{Utils => U}
+
 object PasswordValidator:
   inline private final val PasswordMinLen = 8
 
@@ -59,5 +61,5 @@ object PasswordValidator:
       validateLowerCase(password),
       validateDigit(password),
       validateSpecialChar(password),
-    ).mapN((_, _, _, _, _) => password)
+    ).mapN(U.const5(password))
       .leftMap(_.toNonEmptyVector)
