@@ -1,6 +1,6 @@
 package app
 
-import cats.data.{Chain, NonEmptyChain, NonEmptyVector, Validated, ValidatedNec, ValidatedNel}
+import cats.data.{NonEmptyVector, Validated, ValidatedNec}
 import cats.implicits.*
 
 import app.{Utils => U}
@@ -25,12 +25,6 @@ object PasswordValidator:
 
   private def hasSpecialChar(password: String): Boolean =
     hasCharWithProperty(c => !c.isLetterOrDigit, password)
-
-  private type ValidatedNec[E, A] = Validated[NonEmptyChain[E], A]
-
-  extension [A](a: A)
-    private def validNec[E]: ValidatedNec[E, A] = Validated.Valid(a)
-    private def invalidNec[B]: ValidatedNec[A, B] = Validated.Invalid(NonEmptyChain.one(a))
 
   extension (t: Boolean)
     private def valid[A, B](a: A, b: B): ValidatedNec[B, A] =
