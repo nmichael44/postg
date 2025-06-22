@@ -294,29 +294,31 @@ object MovieApp:
   private given [F[_]: Async]: EntityDecoder[F, MovieDbModel.UserDetails] =
     jsonOf[F, MovieDbModel.UserDetails]
 
-  private def createSystemUser[F[_]: { Async, Logger }](
+  private def createSystemUser[F[_]: { Async as async, Logger }](
       serverState: ServerState[F],
       req: Request[F],
       uuidGen: UUIDGenerator[F],
   ): F[WebServiceResult] =
-    req.as[MovieDbModel.UserDetails] >>= { userDetails =>
-      jobHandler[F, CreateSystemUserResult](
-        req,
-        serverState,
-        uuidGen,
-        CreateSystemUser(userDetails),
-        { case CreateSystemUserResult(res) =>
-          res match {
-            case Left(CreateSystemUserError.DuplicateLoginNameInDB(loginName)) =>
-              WebServiceResult.ConflictRes(s"The given loginName '$loginName' was already present in the database.")
-            case Left(CreateSystemUserError.BadPassword(errorList)) =>
-              val errorStr = errorList.toVector.mkString("\"", "\", \"", "\"")
-              WebServiceResult.BadRequestRes(s"Invalid password. Errors: [$errorStr]")
-            case Right(userId) =>
-              WebServiceResult.OkJsonRes(Json.obj("userId" -> userId.asJson))
-          }
-        },
-      )
+    req.as[MovieDbModel.UserDetails].attempt >>= {
+      case Left(_) => async.pure(WebServiceResult.BadRequestRes("Invalid request body"))
+      case Right(userDetails) =>
+        jobHandler[F, CreateSystemUserResult](
+          req,
+          serverState,
+          uuidGen,
+          CreateSystemUser(userDetails),
+          { case CreateSystemUserResult(res) =>
+            res match {
+              case Left(CreateSystemUserError.DuplicateLoginNameInDB(loginName)) =>
+                WebServiceResult.ConflictRes(s"The given loginName '$loginName' was already present in the database.")
+              case Left(CreateSystemUserError.BadPassword(errorList)) =>
+                val errorStr = errorList.toVector.mkString("\"", "\", \"", "\"")
+                WebServiceResult.BadRequestRes(s"Invalid password. Errors: [$errorStr]")
+              case Right(userId) =>
+                WebServiceResult.OkJsonRes(Json.obj("userId" -> userId.asJson))
+            }
+          },
+        )
     }
 
   private def createSystemUser[F[_]: { Async, Logger }](
@@ -393,24 +395,26 @@ object MovieApp:
         )
     }
 
-  private def processLoginRequest[F[_]: { Async, Logger }](
+  private def processLoginRequest[F[_]: { Async as async, Logger }](
       serverState: ServerState[F],
       req: Request[F],
       uuidGen: UUIDGenerator[F],
   ): F[WebServiceResult] =
-    req.as[MovieDbModel.UserDetails] >>= { userDetails =>
-      jobHandler[F, LoginRequestResult](
-        req,
-        serverState,
-        uuidGen,
-        LoginRequest(userDetails),
-        { case LoginRequestResult(res) =>
-          res match {
-            case Left(_) => WebServiceResult.UnauthorizedRes("Invalid loginName/password specified.")
-            case Right(token) => WebServiceResult.OkJsonRes(Json.obj("token" -> token.asJson))
-          }
-        },
-      )
+    req.as[MovieDbModel.UserDetails].attempt >>= {
+      case Left(_) => async.pure(WebServiceResult.BadRequestRes("Invalid request body"))
+      case Right(userDetails) =>
+        jobHandler[F, LoginRequestResult](
+          req,
+          serverState,
+          uuidGen,
+          LoginRequest(userDetails),
+          { case LoginRequestResult(res) =>
+            res match {
+              case Left(_) => WebServiceResult.UnauthorizedRes("Invalid loginName/password specified.")
+              case Right(token) => WebServiceResult.OkJsonRes(Json.obj("token" -> token.asJson))
+            }
+          },
+        )
     }
 
   given CanEqual[CIString, CIString] = CanEqual.derived
