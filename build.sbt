@@ -11,9 +11,11 @@ val circeVersion = "0.14.14"
 val scalatestVersion = "3.2.19"
 val pureConfigCoreVersion = "0.17.9"
 val catsEffectTestingScalatestVersion = "1.6.0"
-val jwtCirceVersion = "10.0.4"
+val jwtCirceVersion = "11.0.0"
 val password4jVersion = "1.8.3"
 val emilVersion = "0.19.0"
+val jMailVersion = "2.0.1"
+val catsRetryVersion = "4.0.0"
 
 lazy val root = (project in file("."))
   .settings(
@@ -21,6 +23,7 @@ lazy val root = (project in file("."))
     scalacOptions ++= Seq("-deprecation", "-Xmax-inlines:64", "-language:strictEquality"),
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % catsEffectVersion,
+      "com.github.cb372" %% "cats-retry" % catsRetryVersion,
       "org.postgresql" % "postgresql" % postgresVersion,
       "org.tpolecat" %% "doobie-core" % doobieVersion,
       "org.tpolecat" %% "doobie-postgres" % doobieVersion,
@@ -41,6 +44,7 @@ lazy val root = (project in file("."))
       "com.password4j" % "password4j" % password4jVersion,
       "com.github.eikek" %% "emil-common" % emilVersion,
       "com.github.eikek" %% "emil-javamail" % emilVersion,
+      "com.sanctionco.jmail" % "jmail" % jMailVersion,
       "org.typelevel" %% "cats-effect-testing-scalatest" % catsEffectTestingScalatestVersion % Test,
       "org.scalatest" %% "scalatest" % scalatestVersion % Test,
     ),

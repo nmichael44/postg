@@ -1,6 +1,6 @@
 package app
 
-import cats.data.{EitherT, NonEmptyVector}
+import cats.data.{EitherT, NonEmptyVector, Validated}
 import cats.effect.{Async, Deferred}
 import cats.effect.std.Queue
 import cats.syntax.all.*
@@ -8,7 +8,7 @@ import cats.syntax.all.*
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
-import app.services.{AuthService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
+import app.services.{AuthService, EmailService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
 import app.services.MovieRepositoryUtils.DBError
 import app.ImplicitConversions.*
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult, LoginRequestError}
@@ -30,6 +30,7 @@ object HttpWorker:
       serverStateUpdateService: ServerStateUpdateService[F],
       passwordHasherService: PasswordHasher[F],
       authService: AuthService[F],
+      emailService: EmailService[F],
       memCaches: MemCaches[F],
       val uuidScope: TraceIdScope[F, Option[String]],
   ):
@@ -37,7 +38,7 @@ object HttpWorker:
     private val actorMemCache = memCaches.actorCache
     private val movieMemCache = memCaches.movieCache
 
-    private val WorkerFiberName = "Worker"
+    private val WorkerFiberName = "Http Worker"
 
     def logi(s: String): F[Unit] =
       uuidScope.get >>= (uuidOpt => uuidOpt.fold(U.logi(WorkerFiberName, s))(U.logi(WorkerFiberName, _, s)))
@@ -225,6 +226,24 @@ object HttpWorker:
 
       res.value.map(JobResult.LoginRequestResult.apply)
 
+    private def createEmailMsg(msg: MovieDbModel.EmailMessage): Validated[NonEmptyVector[String], emil.Mail[F]] =
+      (
+        EmailValidator.validateEmail("From", msg.from),
+        EmailValidator.validateEmails("To", msg.tos),
+        EmailValidator.validateEmails("Cc", msg.ccs),
+        EmailValidator.validateEmails("Bcc", msg.bccs),
+      ).mapN((_, _, _, _) => EmailUtils.createMail(msg.from, msg.tos, msg.ccs, msg.bccs, msg.subject, msg.body))
+        .leftMap(_.toNonEmptyVector)
+
+    private def processSendEmail(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.SendEmail]
+      val msg = j.msg
+
+      (createEmailMsg(msg).toEither match {
+        case Left(xs) => async.pure(Left(xs))
+        case Right(email) => emailService.sendEmail(email) *> async.pure(Right("Email Sent!"))
+      }).map(JobResult.SendEmailResult.apply)
+
     private val JobHandlersMap: Map[Class[? <: JobKind], JobKind => F[JobResult]] = Map(
       classOf[JobKind.GetDirectorsDetailsByName]  -> getDirectorsDetailsByName,
       classOf[JobKind.GetDirectorDetails]         -> getDirectorDetails,
@@ -237,6 +256,7 @@ object HttpWorker:
       classOf[JobKind.FetchSystemUserByLoginName] -> fetchSystemUserByLoginName,
       classOf[JobKind.FetchSystemUserByUserId]    -> fetchSystemUserByUserId,
       classOf[JobKind.LoginRequest]               -> processLoginRequest,
+      classOf[JobKind.SendEmail]                  -> processSendEmail,
     )
 
     private def misingJobImplementationException(job: JobKind): Exception =
@@ -256,7 +276,7 @@ object HttpWorker:
       _ <- jobExecutor.logi("Waiting for work.")
       (job, deferred, uuid) <- queue.take.map(j => (j.job, j.deferred, j.uuid))
       _ <- jobExecutor.uuidScope.scope(Some(uuid)).use { _ =>
-        val jobExecution = for {
+        val jobExecution: F[Unit] = for {
           _ <- jobExecutor.logi(s"Starting to work on ${job.shortName}...")
           outcome <- jobExecutor.executeJob(job).attempt
           _ <- jobExecutor.logi("Done. Sending results back...")
@@ -292,6 +312,7 @@ object HttpWorker:
         deps.serverStateUpdateService,
         deps.passwordHasherService,
         deps.authService,
+        deps.emailService,
         deps.memCaches,
         deps.uuidScope,
       )

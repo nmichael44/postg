@@ -5,8 +5,11 @@ curl -k -X POST -H "Content-Type: application/json" -d '{"loginName":"neo", "pas
 Get Token:
 =============
 curl -k -X POST -H "Content-Type: application/json" -d '{"loginName":"neo", "password":"fake_password"}' https://localhost:443/login
-
 curl -k -X POST -H "Content-Type: application/json" -H "X-Request-ID: <your-unique-uuid-here>" -d '{"loginName":"neo", "password":"fake_password"}' https://localhost:443/login
+
+Send Email
+==========
+curl -k -X POST -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJuZW8tYXBwIiwic3ViIjoiOCIsImlhdCI6MTc1MDQzMDI1MywiZXhwIjoxNzUwNDQ0NjUzLCJ1c2VySWQiOjgsImlzc3VlZEF0IjoxNzUwNDMwMjUzLCJleHBpcmVzQXQiOjE3NTA0NDQ2NTMsInBlcm1pc3Npb25zIjpbInNpbGx5IiwicGVybWlzc2lvbnMiLCJmb3IiLCJub3ciLCIhIl19.kmO-VVWq4QxJvavfJxapJd-dsIQ1pCp7sRyyv8wQvxM" -H "Content-Type: application/json" -d '{"from": "nmichael@gmail.com", "tos": ["nmichael@yahoo.com"], "ccs": [], "bccs": [], "subject": "Hi", "body": "there"}' https://localhost:443/api/sendEmail
 
 Use Token:
 ==========

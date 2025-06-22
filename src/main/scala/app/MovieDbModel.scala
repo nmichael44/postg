@@ -38,3 +38,12 @@ object MovieDbModel:
   final case class UserDetailsInDb(userId: Int, loginName: String, hashedPassword: String)
 
   final case class AuthenticatedUser(userId: Long, permissions: Set[String], issuedAt: Long, expiresAt: Long)
+
+  final case class EmailMessage(
+      from: String,
+      tos: Seq[String],
+      ccs: Seq[String],
+      bccs: Seq[String],
+      subject: String,
+      body: String,
+  )

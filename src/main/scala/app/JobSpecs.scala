@@ -2,7 +2,7 @@ package app
 
 import cats.data.NonEmptyVector
 
-import app.MovieDbModel.UserDetails
+import app.MovieDbModel.{EmailMessage, UserDetails}
 import io.circe.Json
 
 object JobSpecs:
@@ -19,6 +19,7 @@ object JobSpecs:
     case FetchSystemUserByLoginName(loginName: String) extends JobKind("FetchSystemUserByLoginName")
     case FetchSystemUserByUserId(userIdStr: String) extends JobKind("FetchSystemUserByUserId")
     case LoginRequest(userDetails: UserDetails) extends JobKind("LoginRequest")
+    case SendEmail(msg: EmailMessage) extends JobKind("EmailMessage")
 
   enum FetchSystemUserError derives CanEqual:
     case NotFound
@@ -43,3 +44,4 @@ object JobSpecs:
     case FetchSystemUserByLoginNameResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
     case FetchSystemUserByUserIdResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
     case LoginRequestResult(res: Either[LoginRequestError, String])
+    case SendEmailResult(res: Either[NonEmptyVector[String], String])

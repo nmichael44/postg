@@ -11,11 +11,11 @@ import cats.Applicative
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
-import app.serviceslive.{AuthServiceLive, EmailServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
+import app.serviceslive.{AuthServiceLive, EmailServiceAsyncLive, EmailServiceAsyncLive2, EmailServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig, ServerConnectionConfig}
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult}
-import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest}
-import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult}
+import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest, SendEmail}
+import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, SendEmailResult}
 import app.MovieDbModel.DirectorPath
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
@@ -24,6 +24,7 @@ import fs2.io.net.Network
 import io.circe.*
 import io.circe.generic.auto.*
 import io.circe.syntax.*
+import org.checkerframework.framework.qual.PostconditionAnnotation
 import org.http4s
 import org.http4s.*
 import org.http4s.circe.*
@@ -142,6 +143,7 @@ object MovieApp:
       job: JobKind,
       f: T => WebServiceResult,
   ): F[WebServiceResult] =
+    println("Hi dude")
     val res: F[Either[Throwable, JobResult]] = for {
       _ <- logi("Finding XRequestId header.")
       uuid <- RequestHeaderUtils
@@ -365,6 +367,32 @@ object MovieApp:
       },
     )
 
+  private given [F[_]: Async]: EntityDecoder[F, MovieDbModel.EmailMessage] =
+    jsonOf[F, MovieDbModel.EmailMessage]
+
+  private def sendEmail[F[_]: { Async as async, Logger }](
+      serverState: ServerState[F],
+      ctxReq: ContextRequest[F, AuthenticatedUser],
+      uuidGen: UUIDGenerator[F],
+  ): F[WebServiceResult] =
+    val req = ctxReq.req
+    req.as[MovieDbModel.EmailMessage].attempt >>= {
+      case Left(_) => async.pure(WebServiceResult.BadRequestRes("Invalid request body"))
+      case Right(msg) =>
+        jobHandler[F, SendEmailResult](
+          ctxReq.req,
+          serverState,
+          uuidGen,
+          SendEmail(msg),
+          { case SendEmailResult(res) =>
+            res match {
+              case Left(errors) => WebServiceResult.BadRequestRes(s"Errors: ${errors.toString}")
+              case Right(str) => WebServiceResult.OkJsonRes(Json.obj("status" -> str.asJson))
+            }
+          },
+        )
+    }
+
   private def processLoginRequest[F[_]: { Async, Logger }](
       serverState: ServerState[F],
       req: Request[F],
@@ -456,7 +484,10 @@ object MovieApp:
         fetchSystemUserByLoginName(serverState, ctxReq, uuidGen, loginName)
       case ctxReq @ GET -> Root / "fetchSystemUserByUserId" / userIdStr as _ =>
         fetchSystemUserByUserId(serverState, ctxReq, uuidGen, userIdStr)
+      case ctxReq @ POST -> Root / "sendEmail" as _ =>
+        sendEmail(serverState, ctxReq, uuidGen)
     }
+
   private def publicRoutesPath[F[_]: { Async, Logger }](deps: AppDependencies[F], render: Render[F]): (String, HttpRoutes[F]) =
     "/" -> HttpRoutes.of[F](publicRoutes(deps).andThen(_ >>= render.apply))
 
@@ -648,6 +679,7 @@ object MovieApp:
         xa <- DoobieObj.xaResource[F](appConfig.getDbConnectionConfig)
         uuidGen <- UUIDGenerator.create[F]
         uuidScope <- Resource.eval[F, TraceIdScope[F, Option[String]]](TraceIdScope.fromIOLocal[Option[String]](None))
+        emailService <- EmailServiceAsyncLive2.create[F](appConfig.getGmailConfig)
       } yield {
         val externalApiClientService: ExternalApiClientService[F] = ExternalApiClientServiceLive.create[F](httpClient)
         val movieRepositoryService: MovieRepositoryService[F] = MovieRepositoryServiceLive.create[F](xa)
@@ -655,7 +687,6 @@ object MovieApp:
         val serverStateUpdateService: ServerStateUpdateService[F] = ServerStateUpdateServiceLive.create[F](serverState)
         val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create[F]
         val authService: AuthService[F] = AuthServiceLive.create[F](appConfig.getAuthConfig, java.time.Clock.systemUTC())
-        val emailService: EmailService[F] = EmailServiceLive.create(appConfig.getGmailConfig)
 
         AppDependencies(
           appConfig,

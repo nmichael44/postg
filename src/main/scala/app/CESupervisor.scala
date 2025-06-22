@@ -1,6 +1,6 @@
 package app
 
-import cats.effect.{kernel, ExitCode, Temporal}
+import cats.effect.{ExitCode, Temporal}
 import cats.effect.kernel.Outcome
 import cats.effect.std.Supervisor
 import cats.implicits.*
