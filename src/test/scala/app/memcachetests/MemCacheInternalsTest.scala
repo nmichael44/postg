@@ -33,11 +33,11 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- IO.sleep(60.millis)
           // Should be None -- get will not return an expired value.
           getAfterExpiry <- cache.get(key)
-          (m0, s0, lru0, _) <- cache.getInternalCacheState
+          (m0, s0, lru0, _, _) <- cache.getInternalCacheState
           _ <- IO.sleep(60.millis)
           // Should be None -- removed completely from the cache by the worker.
           getAfterWorker <- cache.get(key)
-          (m1, s1, lru1, _) <- cache.getInternalCacheState
+          (m1, s1, lru1, _, _) <- cache.getInternalCacheState
         } yield (getBeforeWorker shouldBe Some(value)) ~&> (getAfterExpiry shouldBe None) ~&> (getAfterWorker shouldBe None) ~&>
           (m0.size shouldBe 1) ~&> (s0.size shouldBe 1) ~&> (lru0.size shouldBe 1) ~&>
           (m1.size shouldBe 0) ~&> (s1.size shouldBe 0) ~&> (lru1.size shouldBe 0)
@@ -61,7 +61,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- cache.get(k1)                       // k1 accessed, its seq should update to 3. seqCounter becomes 4.
 
           internalState <- cache.getInternalCacheState
-          (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
+          (mainMap, expirySet, lruMap, currentSeqCounter, _) = internalState
 
           nowAfterOps <- IO.realTimeInstant
         } yield
@@ -117,7 +117,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           // Cache: k2 (1), k3 (2). LRU: k2
 
           internalState <- cache.getInternalCacheState
-          (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
+          (mainMap, expirySet, lruMap, currentSeqCounter, _) = internalState
         } yield
           // --- Assertions on mainMap ---
           (mainMap.size shouldBe cacheCapacity) ~&>   // Should be 2
@@ -169,7 +169,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- IO.sleep(cleanupInterval + 75.millis) // e.g., 175ms sleep
 
           internalState <- cache.getInternalCacheState
-          (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
+          (mainMap, expirySet, lruMap, currentSeqCounter, _) = internalState
 
           nowForExpiryCheck <- IO.realTimeInstant
 
@@ -223,7 +223,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- cache.put(k4, v4)
           _ <- IO.sleep(100.millis)
           internalState <- cache.getInternalCacheState
-          (mainMap, _, lruMap, _) = internalState
+          (mainMap, _, lruMap, _, _) = internalState
         } yield (mainMap.size shouldBe lruMap.size) ~&>
           (mainMap.keySet shouldBe lruMap.values.toSet)
       }
@@ -258,7 +258,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- IO.sleep(cleanupInterval + 50.millis)
 
           internalState <- cache.getInternalCacheState
-          (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
+          (mainMap, expirySet, lruMap, currentSeqCounter, _) = internalState
         } yield
           // Short expiry items should be cleaned up
           (shortExpiryPairs.forall(p => !mainMap.contains(p._1)) shouldBe true) ~&>
@@ -303,7 +303,7 @@ final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Ma
           _ <- IO.sleep(cleanupInterval + 50.millis)
 
           internalState <- cache.getInternalCacheState
-          (mainMap, expirySet, lruMap, currentSeqCounter) = internalState
+          (mainMap, expirySet, lruMap, currentSeqCounter, _) = internalState
         } yield
           // Short expiry items should be cleaned up
           (shortExpiryPairs.forall(p => !mainMap.contains(p._1)) shouldBe true) ~&>

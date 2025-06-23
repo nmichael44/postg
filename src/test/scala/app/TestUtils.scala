@@ -25,9 +25,10 @@ object TestUtils:
       name: String = "test-cache",
       capacity: Int = 10,
       cleanupDuration: FiniteDuration = 1.hour,
+      timeTickDuration: FiniteDuration = 4.seconds,
   ): Resource[IO, MemCache[IO, K, V]] =
     require(capacity > 0, "Capacity must be positive.")
-    MemCache.createResource[IO, K, V](name, capacity, cleanupDuration)
+    MemCache.createResource[IO, K, V](name, capacity, cleanupDuration, timeTickDuration)
 
   def hasExpired(expiry: Instant, now: Instant): Boolean =
     !now.isBefore(expiry)

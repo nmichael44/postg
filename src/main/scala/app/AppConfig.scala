@@ -43,28 +43,34 @@ object AppConfig:
   final case class DirectorMemCacheConfig(
       private val capacity: Int,
       private val cleanupDurationInMillis: Int,
+      private val timeTickDurationInMillis: Int,
       private val cacheEnabled: Boolean,
   ) derives ConfigReader:
     def getCapacity: Int = capacity
     def getCleanupDurationInMillis: Int = cleanupDurationInMillis
+    def getTimeTickDurationInMillis: Int = timeTickDurationInMillis
     def getCacheEnabled: Boolean = cacheEnabled
 
   final case class ActorMemCacheConfig(
       private val capacity: Int,
       private val cleanupDurationInMillis: Int,
+      private val timeTickDurationInMillis: Int,
       private val cacheEnabled: Boolean,
   ) derives ConfigReader:
     def getCapacity: Int = capacity
     def getCleanupDurationInMillis: Int = cleanupDurationInMillis
+    def getTimeTickDurationInMillis: Int = timeTickDurationInMillis
     def getCacheEnabled: Boolean = cacheEnabled
 
   final case class MovieMemCacheConfig(
       private val capacity: Int,
       private val cleanupDurationInMillis: Int,
+      private val timeTickDurationInMillis: Int,
       private val cacheEnabled: Boolean,
   ) derives ConfigReader:
     def getCapacity: Int = capacity
     def getCleanupDurationInMillis: Int = cleanupDurationInMillis
+    def getTimeTickDurationInMillis: Int = timeTickDurationInMillis
     def getCacheEnabled: Boolean = cacheEnabled
 
   final case class MemCacheConfig(

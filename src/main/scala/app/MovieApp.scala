@@ -536,8 +536,9 @@ object MovieApp:
       cacheName: String,
       capacity: Int,
       cleanupDuration: FiniteDuration,
+      timeTickDuration: FiniteDuration,
   ): Resource[F, MemCache[F, Long, T]] =
-    MemCache.createResource[F, Long, T](cacheName, capacity, cleanupDuration)
+    MemCache.createResource[F, Long, T](cacheName, capacity, cleanupDuration, timeTickDuration)
 
   private def createDirectorMemCache[F[_]: { Temporal, Logger }](
       directorMemCacheConfig: DirectorMemCacheConfig,
@@ -546,6 +547,7 @@ object MovieApp:
       "Director MemCache",
       directorMemCacheConfig.getCapacity,
       directorMemCacheConfig.getCleanupDurationInMillis.milliseconds,
+      directorMemCacheConfig.getTimeTickDurationInMillis.milliseconds,
     )
 
   private def createActorMemCache[F[_]: { Temporal, Logger }](
@@ -555,6 +557,7 @@ object MovieApp:
       "Actor MemCache",
       actorMemCacheConfig.getCapacity,
       actorMemCacheConfig.getCleanupDurationInMillis.milliseconds,
+      actorMemCacheConfig.getTimeTickDurationInMillis.milliseconds,
     )
 
   private def createMovieMemCache[F[_]: { Temporal, Logger }](
@@ -564,6 +567,7 @@ object MovieApp:
       "Movie MemCache",
       movieMemCacheConfig.getCapacity,
       movieMemCacheConfig.getCleanupDurationInMillis.milliseconds,
+      movieMemCacheConfig.getTimeTickDurationInMillis.milliseconds,
     )
 
   final class MemCaches[F[_]](

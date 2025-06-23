@@ -11,6 +11,7 @@ import scala.collection.immutable.{TreeMap, TreeSet}
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.jdk.DurationConverters.ScalaDurationOps
 
+import app.{Utils => U}
 import app.MemCache.{hasExpired, CacheElem, CacheState}
 import org.typelevel.log4cats.Logger
 
@@ -19,25 +20,24 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
     capacity: Int,
     r: Ref[F, CacheState[K, V]],
     cleanupFiber: Fiber[F, Throwable, Nothing],
+    timeTickFiber: Fiber[F, Throwable, Nothing],
 ):
   def get(k: K): F[Option[V]] =
-    temporal.realTimeInstant >>= { now =>
-      r.modify { case cacheState0 @ CacheState(m0, s0, lruMap0, seqCounter0) =>
-        m0.get(k).fold((cacheState0, None)) { case CacheElem(v, expiryOpt, seqCount) =>
-          expiryOpt match {
-            // Item has an expiry, AND it is currently expired.
-            case Some(expiry) if hasExpired(expiry, now) =>
-              (cacheState0, None)
-            // This case covers two cases:
-            //   1. Item has an expiry, AND it is NOT currently expired.
-            //   2. Item has NO expiry (expiryOpt is None).
-            case _ =>
-              val m1 = m0.updated(k, CacheElem(v, expiryOpt, seqCounter0))
-              val s1 = s0
-              val lruMap1 = (lruMap0 - seqCount).updated(seqCounter0, k)
-              val seqCounter1 = seqCounter0 + 1
-              (CacheState(m1, s1, lruMap1, seqCounter1), v.some)
-          }
+    r.modify { case cacheState0 @ CacheState(m0, s0, lruMap0, seqCounter0, now) =>
+      m0.get(k).fold((cacheState0, None)) { case CacheElem(v, expiryOpt, seqCount) =>
+        expiryOpt match {
+          // Item has an expiry, AND it is currently expired.
+          case Some(expiry) if hasExpired(expiry, now) =>
+            (cacheState0, None)
+          // This case covers two cases:
+          //   1. Item has an expiry, AND it is NOT currently expired.
+          //   2. Item has NO expiry (expiryOpt is None).
+          case _ =>
+            val m1 = m0.updated(k, CacheElem(v, expiryOpt, seqCounter0))
+            val s1 = s0
+            val lruMap1 = (lruMap0 - seqCount).updated(seqCounter0, k)
+            val seqCounter1 = seqCounter0 + 1
+            (CacheState(m1, s1, lruMap1, seqCounter1, now), v.some)
         }
       }
     }
@@ -64,34 +64,34 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
     else (m0, s0, lru0)
 
   private def putAux(k: K, v: V, durationOpt: Option[java.time.Duration]): F[Unit] =
-    temporal.realTimeInstant >>= { now =>
-      r.update { case CacheState(m, s, lruMap, seqCounter0) =>
-        val existingEntryOpt: Option[CacheElem[V]] = m.get(k)
+    r.update { case CacheState(m, s, lruMap, seqCounter0, now) =>
+      val existingEntryOpt: Option[CacheElem[V]] = m.get(k)
 
-        val (m0, s0, lruMap0) = if existingEntryOpt.isDefined then (m, s, lruMap) else evictIfNecessary(m, s, lruMap)
+      val (m0, s0, lruMap0) = if existingEntryOpt.isDefined then (m, s, lruMap) else evictIfNecessary(m, s, lruMap)
 
-        val newExpiryOpt: Option[Instant] = durationOpt.map(now.plus)
-        val m1 = m0.updated(k, CacheElem(v, newExpiryOpt, seqCounter0))
+      val newExpiryOpt: Option[Instant] = durationOpt.map(now.plus)
+      val m1 = m0.updated(k, CacheElem(v, newExpiryOpt, seqCounter0))
 
-        val s1Aux = existingEntryOpt.flatMap(_._2).fold(s0)(currExpiry => s0 - ((currExpiry, k)))
-        val s1 = newExpiryOpt.fold(s1Aux)(newExpiry => s1Aux + ((newExpiry, k)))
-        val lruMap1 = existingEntryOpt
-          .fold(lruMap0) { case CacheElem(_, _, seqCount) => lruMap0 - seqCount }
-          .updated(seqCounter0, k)
-        val seqCounter1 = seqCounter0 + 1
+      val s1Aux = existingEntryOpt.flatMap(_._2).fold(s0)(currExpiry => s0 - ((currExpiry, k)))
+      val s1 = newExpiryOpt.fold(s1Aux)(newExpiry => s1Aux + ((newExpiry, k)))
+      val lruMap1 = existingEntryOpt
+        .fold(lruMap0) { case CacheElem(_, _, seqCount) => lruMap0 - seqCount }
+        .updated(seqCounter0, k)
+      val seqCounter1 = seqCounter0 + 1
 
-        CacheState(m1, s1, lruMap1, seqCounter1)
-      }
+      CacheState(m1, s1, lruMap1, seqCounter1, now)
     }
 
   private def stopCleanupFiber(): F[Unit] =
-    logger.info(s"Stopping mem cache '$memCacheName' worker...") *>
+    logger.info(s"Stopping memCache '$memCacheName' cleanup worker...") *>
       cleanupFiber.cancel *>
-      logger.info(s"Mem cache '$memCacheName' worker stopped.")
+      logger.info(s"Stopping memCache '$memCacheName' timeTick worker...") *>
+      timeTickFiber.cancel *>
+      logger.info(s"Mem cache '$memCacheName' workers stopped.")
 
   // This function is to be used for testing only.
-  def getInternalCacheState: F[(TreeMap[K, CacheElem[V]], TreeSet[(Instant, K)], TreeMap[Long, K], Long)] =
-    r.get.map { case CacheState(m, s, lruMap, seqCounter) => (m, s, lruMap, seqCounter) }
+  def getInternalCacheState: F[(TreeMap[K, CacheElem[V]], TreeSet[(Instant, K)], TreeMap[Long, K], Long, Instant)] =
+    r.get.map { case CacheState(m, s, lruMap, seqCounter, now) => (m, s, lruMap, seqCounter, now) }
 
 object MemCache:
   private final case class CacheState[K, V](
@@ -99,6 +99,7 @@ object MemCache:
       expirySet: TreeSet[(Instant, K)],
       lruMap: TreeMap[Long, K],
       seqCounter: Long,
+      cachedNow: Instant,
   )
 
   // This is not private because we use it in unit tests.
@@ -111,25 +112,29 @@ object MemCache:
   private def hasExpired(expiry: Instant, now: Instant): Boolean =
     !now.isBefore(expiry)
 
-  private def create[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
+  private def create[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       capacity: Int,
       cleanupDuration: Duration,
+      timeTickDuration: Duration,
   ): F[MemCache[F, K, V]] =
     for {
+      now <- temporal.realTimeInstant
       r <- Ref.of(
-        CacheState(TreeMap.empty[K, CacheElem[V]], TreeSet.empty[(Instant, K)], TreeMap.empty[Long, K], 0L),
+        CacheState(TreeMap.empty[K, CacheElem[V]], TreeSet.empty[(Instant, K)], TreeMap.empty[Long, K], 0L, now),
       )
-      cleanupFiber <- startWorker(memCacheName, r, cleanupDuration)
-    } yield MemCache(memCacheName, capacity, r, cleanupFiber)
+      cleanupFiber <- startCleanupWorker(memCacheName, r, cleanupDuration)
+      timeTickingFiber <- startTimeTickingWorker(memCacheName, r, timeTickDuration)
+    } yield MemCache(memCacheName, capacity, r, cleanupFiber, timeTickingFiber)
 
   def createResource[F[_]: { Temporal, Logger }, K: Ordering, V](
       memCacheName: String,
       capacity: Int,
       cleanupDuration: Duration,
+      timeTickDuration: Duration,
   ): Resource[F, MemCache[F, K, V]] =
     assert(capacity > 0, "Capacity must be greater than 0.")
-    Resource.make(create(memCacheName, capacity, cleanupDuration))(_.stopCleanupFiber())
+    Resource.make(create(memCacheName, capacity, cleanupDuration, timeTickDuration))(_.stopCleanupFiber())
 
   private def getSize[F[_]: Functor, K, V](r: Ref[F, CacheState[K, V]]): F[(Int, Int)] =
     r.get.map(cs => (cs.mainMap.size, cs.expirySet.size))
@@ -141,18 +146,19 @@ object MemCache:
   ): F[Unit] =
     getSize(r) >>= { (mSiz, tSiz) => logger.info(s"Sizes of cache '$memCacheName' $when worker touched it: ($mSiz, $tSiz).") }
 
-  private def worker[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V](
+  private val CleanupWorkerName: String = "CleanupWorker"
+
+  private def cleanupWorker[F[_]: { Temporal as temporal, Logger as logger }, K, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
       cleanupInterval: Duration,
   ): F[Nothing] =
     (for {
-      _ <- logger.info(s"Cleanup worker for '$memCacheName', going to sleep until it's time to work...")
+      _ <- U.logi(CleanupWorkerName, s"Cleanup worker for '$memCacheName', going to sleep until it's time to work...")
       _ <- temporal.sleep(cleanupInterval)
-      _ <- logger.info(s"Cleanup worker for '$memCacheName', is awake and going to work...")
+      _ <- U.logi(CleanupWorkerName, s"Cleanup worker for '$memCacheName', is awake and going to work...")
       _ <- reportSize(memCacheName, r, "before")
-      now <- temporal.realTimeInstant
-      _ <- r.update { case CacheState(m0, s0, lruMap0, seqCounter0) =>
+      _ <- r.update { case CacheState(m0, s0, lruMap0, seqCounter0, now) =>
         val expiredEntries = s0.view.takeWhile((expiry, _) => hasExpired(expiry, now)).toVector
         val expiredKeys = expiredEntries.view.map(_._2).toVector
         val expiredSeqs = expiredKeys.view.map(m0(_)._3)
@@ -162,29 +168,64 @@ object MemCache:
         val lruMap1 = lruMap0 -- expiredSeqs
         val seqCounter1 = seqCounter0
 
-        CacheState(m1, s1, lruMap1, seqCounter1)
+        CacheState(m1, s1, lruMap1, seqCounter1, now)
       }
       _ <- reportSize(memCacheName, r, "after")
     } yield ()).handleErrorWith { e =>
       // We don't go paranoid and start worrying about errors being thrown from the logger...
-      logger.error(e)(
+      U.loge(
+        e,
+        CleanupWorkerName,
         s"MemCache cleanup worker for '$memCacheName', encountered an error during a cycle.  Worker will continue to run.",
       )
     }.foreverM
 
-  private def startWorker[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
+  private def startCleanupWorker[F[_]: { Temporal, Logger as logger }, K, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
       cleanupInterval: Duration,
   ): F[Fiber[F, Throwable, Nothing]] = for {
-    _ <- logger.info(s"Starting mem cache worker for '$memCacheName'...")
-    cleanupFiber <- worker(memCacheName, r, cleanupInterval).start
-    _ <- logger.info(s"Worker started for '$memCacheName'.")
-    _ <- logger.info(s"Fiber is '$cleanupFiber'.")
+    _ <- logger.info(s"Starting memCache cleanup worker for '$memCacheName'...")
+    cleanupFiber <- cleanupWorker(memCacheName, r, cleanupInterval).start
+    _ <- logger.info(s"Cleanup worker started for '$memCacheName'. Fiber is '$cleanupFiber'.")
   } yield cleanupFiber
 
+  private val TimeTickWorkerName: String = "TimeTickWorker"
+
+  private def timeTickWorker[F[_]: { Temporal as temporal, Logger as logger }, K, V](
+      memCacheName: String,
+      r: Ref[F, CacheState[K, V]],
+      cleanupInterval: Duration,
+  ): F[Nothing] =
+    (for {
+      - <- U.logi(TimeTickWorkerName, s"TimeTick worker for '$memCacheName', going to sleep until it's time to work...")
+      _ <- temporal.sleep(cleanupInterval)
+      _ <- U.logi(TimeTickWorkerName, s"Cleanup worker for '$memCacheName', is awake and going to work...")
+      now <- temporal.realTimeInstant
+      _ <- r.update { case CacheState(m, s, lruMap, seqCounter, _) =>
+        CacheState(m, s, lruMap, seqCounter, now)
+      }
+      _ <- U.logi(TimeTickWorkerName, s"TimeTick for '$memCacheName', updated!")
+    } yield ()).handleErrorWith { e =>
+      U.loge(
+        e,
+        TimeTickWorkerName,
+        s"MemCache timeTick worker for '$memCacheName', encountered an error during a cycle.  Worker will continue to run.",
+      )
+    }.foreverM
+
+  private def startTimeTickingWorker[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
+      memCacheName: String,
+      r: Ref[F, CacheState[K, V]],
+      timeTickDuration: Duration,
+  ): F[Fiber[F, Throwable, Nothing]] = for {
+    _ <- logger.info(s"Starting memCache timeTick worker for '$memCacheName'...")
+    timeTickFiber <- timeTickWorker(memCacheName, r, timeTickDuration).start
+    _ <- logger.info(s"TimeTick worker started for '$memCacheName'. Fiber is '$timeTickFiber'.")
+  } yield timeTickFiber
+
   def run[F[_]: { Temporal as temporal, Logger as logger }]: F[ExitCode] =
-    MemCache.createResource[F, String, Int]("crazy mem cache", 4, 5.seconds).use { cache =>
+    MemCache.createResource[F, String, Int]("crazy mem cache", 4, 5.seconds, 1.second).use { cache =>
       for {
         _ <- logger.info("Putting key 'a' with no timeout.")
         _ <- cache.put("a", 1)

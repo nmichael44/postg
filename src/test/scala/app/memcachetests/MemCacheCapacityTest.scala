@@ -17,9 +17,10 @@ final class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Mat
       capacity: Int,
       name: String = "capacity-test-cache",
       cleanupDuration: FiniteDuration = 1.hour,
+      timeTickDuration: FiniteDuration = 4.seconds,
   ): Resource[IO, MemCache[IO, K, V]] =
     require(capacity > 0, "Capacity must be positive for these tests")
-    MemCache.createResource[IO, K, V](name, capacity, cleanupDuration)
+    MemCache.createResource[IO, K, V](name, capacity, cleanupDuration, timeTickDuration)
 
   "MemCache: Basic Capacity and LRU Eviction" - {
     "C1: should evict an item when capacity is exceeded" - {
