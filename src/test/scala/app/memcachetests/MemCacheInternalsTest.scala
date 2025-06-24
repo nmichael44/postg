@@ -11,36 +11,43 @@ import scala.jdk.DurationConverters.ScalaDurationOps
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
+import app.{Utils => U}
 import app.TestUtils.*
 
 final class MemCacheInternalsTest extends AsyncFreeSpec with AsyncIOSpec with Matchers:
   "MemCache: Internal State Verification" - {
     "should not return expired items -- worker should remove them -- with internal state tests" in {
-      val cleanupInterval = 100.millis
-      val itemExpiry = 50.millis // Expires before first cleanup
+      val cleanupInterval = 400.millis
+      val itemExpiry = 100.millis // Expires before first cleanup
       val key = "itemToClean"
       val value = 1
 
-      createCache[String, Int](cleanupDuration = cleanupInterval).use { cache =>
+      createCache[String, Int](cleanupDuration = cleanupInterval, timeTickDuration = 40.milliseconds).use { cache =>
         for {
           // Item in the cache will expire at T+50ms. The worker will first run around T+100ms.
           _ <- cache.put(key, value, itemExpiry)
-
           // Should be Some(1), expiry check in get is not enough for this test
           getBeforeWorker <- cache.get(key)
 
           // Sleep a bit longer than the expiry period. Add a small buffer to account for scheduling.
-          _ <- IO.sleep(60.millis)
+          _ <- IO.sleep(200.millis)
+          (_, _, _, _, n) <- cache.getInternalCacheState
+          _ <- U.logi("", "HERE: " + n.toString)
           // Should be None -- get will not return an expired value.
           getAfterExpiry <- cache.get(key)
           (m0, s0, lru0, _, _) <- cache.getInternalCacheState
-          _ <- IO.sleep(60.millis)
+          _ <- IO.sleep(300.millis)
           // Should be None -- removed completely from the cache by the worker.
           getAfterWorker <- cache.get(key)
           (m1, s1, lru1, _, _) <- cache.getInternalCacheState
-        } yield (getBeforeWorker shouldBe Some(value)) ~&> (getAfterExpiry shouldBe None) ~&> (getAfterWorker shouldBe None) ~&>
-          (m0.size shouldBe 1) ~&> (s0.size shouldBe 1) ~&> (lru0.size shouldBe 1) ~&>
-          (m1.size shouldBe 0) ~&> (s1.size shouldBe 0) ~&> (lru1.size shouldBe 0)
+        } yield {
+          println(getBeforeWorker)
+          println(getAfterExpiry)
+          println(getAfterWorker)
+          (getBeforeWorker shouldBe Some(value)) ~&> (getAfterExpiry shouldBe None) ~&> (getAfterWorker shouldBe None) ~&>
+            (m0.size shouldBe 1) ~&> (s0.size shouldBe 1) ~&> (lru0.size shouldBe 1) ~&>
+            (m1.size shouldBe 0) ~&> (s1.size shouldBe 0) ~&> (lru1.size shouldBe 0)
+        }
       }
     }
 

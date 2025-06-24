@@ -8,11 +8,13 @@ import cats.implicits.*
 
 import java.time.Instant
 import scala.collection.immutable.{TreeMap, TreeSet}
-import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.DurationConverters.ScalaDurationOps
+import scala.util.control.NoStackTrace
 
-import app.{Utils => U}
+import app.ImplicitConversions.whenA
 import app.MemCache.{hasExpired, CacheElem, CacheState}
+import app.Utils as U
 import org.typelevel.log4cats.Logger
 
 final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V] private (
@@ -63,24 +65,36 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
       (m1, s1, lru1)
     else (m0, s0, lru0)
 
-  private def putAux(k: K, v: V, durationOpt: Option[java.time.Duration]): F[Unit] =
-    r.update { case CacheState(m, s, lruMap, seqCounter0, now) =>
-      val existingEntryOpt: Option[CacheElem[V]] = m.get(k)
-
-      val (m0, s0, lruMap0) = if existingEntryOpt.isDefined then (m, s, lruMap) else evictIfNecessary(m, s, lruMap)
-
-      val newExpiryOpt: Option[Instant] = durationOpt.map(now.plus)
-      val m1 = m0.updated(k, CacheElem(v, newExpiryOpt, seqCounter0))
-
-      val s1Aux = existingEntryOpt.flatMap(_._2).fold(s0)(currExpiry => s0 - ((currExpiry, k)))
-      val s1 = newExpiryOpt.fold(s1Aux)(newExpiry => s1Aux + ((newExpiry, k)))
-      val lruMap1 = existingEntryOpt
-        .fold(lruMap0) { case CacheElem(_, _, seqCount) => lruMap0 - seqCount }
-        .updated(seqCounter0, k)
-      val seqCounter1 = seqCounter0 + 1
-
-      CacheState(m1, s1, lruMap1, seqCounter1, now)
+  private def checkDuration(durationOpt: Option[java.time.Duration]): F[Unit] =
+    durationOpt match {
+      case Some(d) if d.compareTo(MemCache.ItemMinimumAllowedDuration) < 0 =>
+        temporal.raiseError(
+          new AssertionError(
+            s"MemCache.put(): Duration cannot be less than ${TimeUtils.durationToString(MemCache.ItemMinimumAllowedDuration)}.",
+          ), // We don't do NoStackTrace here because it's helpful to see the stack.
+        )
+      case _ => temporal.pure(())
     }
+
+  private def putAux(k: K, v: V, durationOpt: Option[java.time.Duration]): F[Unit] =
+    checkDuration(durationOpt) *>
+      r.update { case CacheState(m, s, lruMap, seqCounter0, now) =>
+        val existingEntryOpt: Option[CacheElem[V]] = m.get(k)
+
+        val (m0, s0, lruMap0) = if existingEntryOpt.isDefined then (m, s, lruMap) else evictIfNecessary(m, s, lruMap)
+
+        val newExpiryOpt: Option[Instant] = durationOpt.map(now.plus)
+        val m1 = m0.updated(k, CacheElem(v, newExpiryOpt, seqCounter0))
+
+        val s1Aux = existingEntryOpt.flatMap(_._2).fold(s0)(currExpiry => s0 - ((currExpiry, k)))
+        val s1 = newExpiryOpt.fold(s1Aux)(newExpiry => s1Aux + ((newExpiry, k)))
+        val lruMap1 = existingEntryOpt
+          .fold(lruMap0) { case CacheElem(_, _, seqCount) => lruMap0 - seqCount }
+          .updated(seqCounter0, k)
+        val seqCounter1 = seqCounter0 + 1
+
+        CacheState(m1, s1, lruMap1, seqCounter1, now)
+      }
 
   private def stopCleanupFiber(): F[Unit] =
     logger.info(s"Stopping memCache '$memCacheName' cleanup worker...") *>
@@ -109,16 +123,40 @@ object MemCache:
       seqCount: Long,
   )
 
-  private def hasExpired(expiry: Instant, now: Instant): Boolean =
-    !now.isBefore(expiry)
+  private val ItemMinimumAllowedDuration: java.time.Duration =
+    java.time.Duration.of(10, java.time.temporal.ChronoUnit.SECONDS)
+
+  private val MinimumCleanupDuration: FiniteDuration = 30.seconds
+
+  private val MinimumTimeTickDuration: FiniteDuration = 4.seconds
+
+  private def ensureMinCleanupDuration[F[_]: Temporal as temporal](cleanupDuration: FiniteDuration): F[Unit] =
+    (cleanupDuration < MinimumCleanupDuration).whenA(
+      temporal.raiseError(
+        new AssertionError(
+          s"MemCache: Cleanup duration cannot be less than ${TimeUtils.durationToString(MinimumCleanupDuration)}.",
+        ) with NoStackTrace,
+      ),
+    )
+
+  private def ensureMinTimeTickDuration[F[_]: Temporal as temporal](timeTickDuration: FiniteDuration): F[Unit] =
+    (timeTickDuration < MinimumTimeTickDuration).whenA(
+      temporal.raiseError(
+        new AssertionError(
+          s"MemCache: TimeTick duration cannot be less than ${TimeUtils.durationToString(MinimumTimeTickDuration)}.",
+        ) with NoStackTrace,
+      ),
+    )
 
   private def create[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       capacity: Int,
-      cleanupDuration: Duration,
-      timeTickDuration: Duration,
+      cleanupDuration: FiniteDuration,
+      timeTickDuration: FiniteDuration,
   ): F[MemCache[F, K, V]] =
     for {
+      _ <- ensureMinCleanupDuration(cleanupDuration)
+      _ <- ensureMinTimeTickDuration(timeTickDuration)
       now <- temporal.realTimeInstant
       r <- Ref.of(
         CacheState(TreeMap.empty[K, CacheElem[V]], TreeSet.empty[(Instant, K)], TreeMap.empty[Long, K], 0L, now),
@@ -130,11 +168,14 @@ object MemCache:
   def createResource[F[_]: { Temporal, Logger }, K: Ordering, V](
       memCacheName: String,
       capacity: Int,
-      cleanupDuration: Duration,
-      timeTickDuration: Duration,
+      cleanupDuration: FiniteDuration,
+      timeTickDuration: FiniteDuration,
   ): Resource[F, MemCache[F, K, V]] =
     assert(capacity > 0, "Capacity must be greater than 0.")
     Resource.make(create(memCacheName, capacity, cleanupDuration, timeTickDuration))(_.stopCleanupFiber())
+
+  private def hasExpired(expiry: Instant, now: Instant): Boolean =
+    !now.isBefore(expiry)
 
   private def getSize[F[_]: Functor, K, V](r: Ref[F, CacheState[K, V]]): F[(Int, Int)] =
     r.get.map(cs => (cs.mainMap.size, cs.expirySet.size))
@@ -151,7 +192,7 @@ object MemCache:
   private def cleanupWorker[F[_]: { Temporal as temporal, Logger as logger }, K, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
-      cleanupInterval: Duration,
+      cleanupInterval: FiniteDuration,
   ): F[Nothing] =
     (for {
       _ <- U.logi(CleanupWorkerName, s"Cleanup worker for '$memCacheName', going to sleep until it's time to work...")
@@ -183,7 +224,7 @@ object MemCache:
   private def startCleanupWorker[F[_]: { Temporal, Logger as logger }, K, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
-      cleanupInterval: Duration,
+      cleanupInterval: FiniteDuration,
   ): F[Fiber[F, Throwable, Nothing]] = for {
     _ <- logger.info(s"Starting memCache cleanup worker for '$memCacheName'...")
     cleanupFiber <- cleanupWorker(memCacheName, r, cleanupInterval).start
@@ -195,15 +236,16 @@ object MemCache:
   private def timeTickWorker[F[_]: { Temporal as temporal, Logger as logger }, K, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
-      cleanupInterval: Duration,
+      timeTickInterval: FiniteDuration,
   ): F[Nothing] =
+    val temporalAmount = timeTickInterval.toJava
+
     (for {
       - <- U.logi(TimeTickWorkerName, s"TimeTick worker for '$memCacheName', going to sleep until it's time to work...")
-      _ <- temporal.sleep(cleanupInterval)
+      _ <- temporal.sleep(timeTickInterval)
       _ <- U.logi(TimeTickWorkerName, s"Cleanup worker for '$memCacheName', is awake and going to work...")
-      now <- temporal.realTimeInstant
-      _ <- r.update { case CacheState(m, s, lruMap, seqCounter, _) =>
-        CacheState(m, s, lruMap, seqCounter, now)
+      _ <- r.update { case CacheState(m, s, lruMap, seqCounter, now) =>
+        CacheState(m, s, lruMap, seqCounter, now.plus(temporalAmount))
       }
       _ <- U.logi(TimeTickWorkerName, s"TimeTick for '$memCacheName', updated!")
     } yield ()).handleErrorWith { e =>
@@ -217,7 +259,7 @@ object MemCache:
   private def startTimeTickingWorker[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
-      timeTickDuration: Duration,
+      timeTickDuration: FiniteDuration,
   ): F[Fiber[F, Throwable, Nothing]] = for {
     _ <- logger.info(s"Starting memCache timeTick worker for '$memCacheName'...")
     timeTickFiber <- timeTickWorker(memCacheName, r, timeTickDuration).start
