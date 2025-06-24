@@ -1,7 +1,10 @@
 package app
 
+import cats.data.{Validated, ValidatedNec}
+import cats.implicits.*
 import cats.Applicative
 
+import com.sanctionco.jmail.{EmailValidationResult, JMail}
 import emil.builder.*
 
 object EmailUtils:
@@ -26,3 +29,13 @@ object EmailUtils:
         TextBody[F](body),
       )
       .build
+
+  def validateEmail(kind: String, email: String): ValidatedNec[String, Unit] =
+    val result: EmailValidationResult = JMail.validate(email)
+    if result.isSuccess then ().validNec
+    else
+      val reason = result.getFailureReason
+      s"$kind email '$email' was invalid. Reason: $reason".invalidNec
+
+  def validateEmails(kind: String, emails: Seq[String]): ValidatedNec[String, Unit] =
+    emails.traverse(validateEmail(kind, _)).as(())

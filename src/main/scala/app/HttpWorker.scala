@@ -228,10 +228,10 @@ object HttpWorker:
 
     private def createEmailMsg(msg: MovieDbModel.EmailMessage): Validated[NonEmptyVector[String], emil.Mail[F]] =
       (
-        EmailValidator.validateEmail("From", msg.from),
-        EmailValidator.validateEmails("To", msg.tos),
-        EmailValidator.validateEmails("Cc", msg.ccs),
-        EmailValidator.validateEmails("Bcc", msg.bccs),
+        EmailUtils.validateEmail("From", msg.from),
+        EmailUtils.validateEmails("To", msg.tos),
+        EmailUtils.validateEmails("Cc", msg.ccs),
+        EmailUtils.validateEmails("Bcc", msg.bccs),
       ).mapN((_, _, _, _) => EmailUtils.createMail(msg.from, msg.tos, msg.ccs, msg.bccs, msg.subject, msg.body))
         .leftMap(_.toNonEmptyVector)
 
