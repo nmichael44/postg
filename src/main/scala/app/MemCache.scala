@@ -123,12 +123,19 @@ object MemCache:
       seqCount: Long,
   )
 
+  private val TimeTickWorkerName: String = "TimeTickWorker"
+
   private val ItemMinimumAllowedDuration: java.time.Duration =
     java.time.Duration.of(10, java.time.temporal.ChronoUnit.SECONDS)
 
   private val MinimumCleanupDuration: FiniteDuration = 30.seconds
 
   private val MinimumTimeTickDuration: FiniteDuration = 4.seconds
+
+  // After how many updates with the approximate increment (coming from cats effect's sleep + scheduler)
+  // do we correct the actual time.
+  // Setting this to 0, results in using only true time.
+  private val UpdateNowWithTrueTimeAfterNUpdates: Int = 16
 
   private def ensureMinCleanupDuration[F[_]: Temporal as temporal](cleanupDuration: FiniteDuration): F[Unit] =
     (cleanupDuration < MinimumCleanupDuration).whenA(
@@ -231,11 +238,10 @@ object MemCache:
     _ <- logger.info(s"Cleanup worker started for '$memCacheName'. Fiber is '$cleanupFiber'.")
   } yield cleanupFiber
 
-  private val TimeTickWorkerName: String = "TimeTickWorker"
-
   private def timeTickWorker[F[_]: { Temporal as temporal, Logger as logger }, K, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
+      trueTimeUpdateCounter: Ref[F, Int],
       timeTickInterval: FiniteDuration,
   ): F[Nothing] =
     val temporalAmount = timeTickInterval.toJava
@@ -244,8 +250,13 @@ object MemCache:
       - <- U.logi(TimeTickWorkerName, s"TimeTick worker for '$memCacheName', going to sleep until it's time to work...")
       _ <- temporal.sleep(timeTickInterval)
       _ <- U.logi(TimeTickWorkerName, s"Cleanup worker for '$memCacheName', is awake and going to work...")
+      (timeOpt, newCounterVal) <- trueTimeUpdateCounter.get.map { c =>
+        if c == UpdateNowWithTrueTimeAfterNUpdates then (Some(temporal.realTimeInstant), 0) else (None, c + 1)
+      }
+      _ <- trueTimeUpdateCounter.set(newCounterVal)
+      newNowOpt <- timeOpt.sequence
       _ <- r.update { case CacheState(m, s, lruMap, seqCounter, now) =>
-        CacheState(m, s, lruMap, seqCounter, now.plus(temporalAmount))
+        CacheState(m, s, lruMap, seqCounter, newNowOpt.getOrElse(now.plus(temporalAmount)))
       }
       _ <- U.logi(TimeTickWorkerName, s"TimeTick for '$memCacheName', updated!")
     } yield ()).handleErrorWith { e =>
@@ -262,7 +273,8 @@ object MemCache:
       timeTickDuration: FiniteDuration,
   ): F[Fiber[F, Throwable, Nothing]] = for {
     _ <- logger.info(s"Starting memCache timeTick worker for '$memCacheName'...")
-    timeTickFiber <- timeTickWorker(memCacheName, r, timeTickDuration).start
+    trueTimeUpdateCounter <- Ref.of(0)
+    timeTickFiber <- timeTickWorker(memCacheName, r, trueTimeUpdateCounter, timeTickDuration).start
     _ <- logger.info(s"TimeTick worker started for '$memCacheName'. Fiber is '$timeTickFiber'.")
   } yield timeTickFiber
 

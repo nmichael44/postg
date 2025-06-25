@@ -537,50 +537,54 @@ object MovieApp:
       capacity: Int,
       cleanupDuration: FiniteDuration,
       timeTickDuration: FiniteDuration,
-  ): Resource[F, MemCache[F, Long, T]] =
-    MemCache.createResource[F, Long, T](cacheName, capacity, cleanupDuration, timeTickDuration)
+      enabled: Boolean,
+  ): Resource[F, Option[MemCache[F, Long, T]]] =
+    Option.when(enabled)(MemCache.createResource[F, Long, T](cacheName, capacity, cleanupDuration, timeTickDuration)).sequence
 
   private def createDirectorMemCache[F[_]: { Temporal, Logger }](
       directorMemCacheConfig: DirectorMemCacheConfig,
-  ): Resource[F, MemCache[F, Long, MovieDbModel.Director]] =
+  ): Resource[F, Option[MemCache[F, Long, MovieDbModel.Director]]] =
     createCache[F, MovieDbModel.Director](
       "Director MemCache",
       directorMemCacheConfig.getCapacity,
       directorMemCacheConfig.getCleanupDurationInMillis.milliseconds,
       directorMemCacheConfig.getTimeTickDurationInMillis.milliseconds,
+      directorMemCacheConfig.getCacheEnabled,
     )
 
   private def createActorMemCache[F[_]: { Temporal, Logger }](
       actorMemCacheConfig: ActorMemCacheConfig,
-  ): Resource[F, MemCache[F, Long, MovieDbModel.Actor]] =
+  ): Resource[F, Option[MemCache[F, Long, MovieDbModel.Actor]]] =
     createCache[F, MovieDbModel.Actor](
       "Actor MemCache",
       actorMemCacheConfig.getCapacity,
       actorMemCacheConfig.getCleanupDurationInMillis.milliseconds,
       actorMemCacheConfig.getTimeTickDurationInMillis.milliseconds,
+      actorMemCacheConfig.getCacheEnabled,
     )
 
   private def createMovieMemCache[F[_]: { Temporal, Logger }](
       movieMemCacheConfig: MovieMemCacheConfig,
-  ): Resource[F, MemCache[F, Long, MovieDbModel.Movie]] =
+  ): Resource[F, Option[MemCache[F, Long, MovieDbModel.Movie]]] =
     createCache[F, MovieDbModel.Movie](
       "Movie MemCache",
       movieMemCacheConfig.getCapacity,
       movieMemCacheConfig.getCleanupDurationInMillis.milliseconds,
       movieMemCacheConfig.getTimeTickDurationInMillis.milliseconds,
+      movieMemCacheConfig.getCacheEnabled,
     )
 
   final class MemCaches[F[_]](
-      val directorCache: (Boolean, MemCache[F, Long, MovieDbModel.Director]),
-      val actorCache: (Boolean, MemCache[F, Long, MovieDbModel.Actor]),
-      val movieCache: (Boolean, MemCache[F, Long, MovieDbModel.Movie]),
+      val directorCacheOpt: Option[MemCache[F, Long, MovieDbModel.Director]],
+      val actorCacheOpt: Option[MemCache[F, Long, MovieDbModel.Actor]],
+      val movieCacheOpt: Option[MemCache[F, Long, MovieDbModel.Movie]],
   )
 
   private def createMemCaches[F[_]: { Temporal, Logger }](mcc: MemCacheConfig): Resource[F, MemCaches[F]] =
     (
-      createDirectorMemCache(mcc.getDirectorMemCacheConfig).tupleLeft(mcc.getDirectorMemCacheConfig.getCacheEnabled),
-      createActorMemCache(mcc.getActorMemCacheConfig).tupleLeft(mcc.getActorMemCacheConfig.getCacheEnabled),
-      createMovieMemCache(mcc.getMovieMemCacheConfig).tupleLeft(mcc.getMovieMemCacheConfig.getCacheEnabled),
+      createDirectorMemCache(mcc.getDirectorMemCacheConfig),
+      createActorMemCache(mcc.getActorMemCacheConfig),
+      createMovieMemCache(mcc.getMovieMemCacheConfig),
     ).mapN((d, a, m) => MemCaches[F](d, a, m))
 
   private val MainFiberName: String = "MainFiber"

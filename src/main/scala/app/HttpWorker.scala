@@ -34,9 +34,9 @@ object HttpWorker:
       memCaches: MemCaches[F],
       val uuidScope: TraceIdScope[F, Option[String]],
   ):
-    private val directorMemCache = memCaches.directorCache
-    private val actorMemCache = memCaches.actorCache
-    private val movieMemCache = memCaches.movieCache
+    private val directorMemCacheOpt: Option[MemCache[F, Long, MovieDbModel.Director]] = memCaches.directorCacheOpt
+    private val actorMemCacheOpt: Option[MemCache[F, Long, MovieDbModel.Actor]] = memCaches.actorCacheOpt
+    private val movieMemCacheOpt: Option[MemCache[F, Long, MovieDbModel.Movie]] = memCaches.movieCacheOpt
 
     private val WorkerFiberName = "Http Worker"
 
@@ -58,14 +58,15 @@ object HttpWorker:
         itemName: String,
         id: Long,
         cachingDuration: FiniteDuration,
-        cacheDetails: (Boolean, MemCache[F, Long, T]),
+        cacheOpt: Option[MemCache[F, Long, T]],
         f: NonEmptyVector[Long] => F[Map[Long, T]],
         toJobResult: Option[T] => JobResult,
     ): F[JobResult] =
-      val (cacheEnabled, cache) = cacheDetails
+      val cacheEnabled = cacheOpt.isDefined
+
       for {
         _ <- logi(s"Fetching $itemName details for ID: $id")
-        cashedItemOpt <- if cacheEnabled then cache.get(id) else async.pure(None)
+        cashedItemOpt <- cacheOpt.map(_.get(id)).getOrElse(async.pure(None))
         itemOpt <- cashedItemOpt match {
           case Some(item) =>
             logi(s"$itemName details for ID: $id found in cache.").as(Some(item))
@@ -76,9 +77,10 @@ object HttpWorker:
               itemDetailsMap.get(id) match {
                 case Some(item) =>
                   logi(s"$itemName details for ID: $id found in DB.") *>
-                    cacheEnabled
-                      .whenA(logi(s"Putting $itemName for ID: $id in cache.") *> cache.put(id, item, cachingDuration))
-                      .as(Some(item))
+                    cacheOpt.map { cache =>
+                      logi(s"Putting $itemName for ID: $id in cache.") *>
+                        cache.put(id, item, cachingDuration).as(item)
+                    }.sequence
                 case None =>
                   logi(s"$itemName details for ID: $id not found in DB.").as(None)
               }
@@ -94,7 +96,7 @@ object HttpWorker:
         "Director",
         j.directorId,
         DirectorCachingDuration,
-        directorMemCache,
+        directorMemCacheOpt,
         mr.getDirectorDetails,
         JobResult.DirectorDetailsResult.apply,
       )
@@ -115,7 +117,7 @@ object HttpWorker:
         "Actor",
         j.actorId,
         ActorCachingDuration,
-        actorMemCache,
+        actorMemCacheOpt,
         mr.getActorDetails,
         JobResult.ActorDetailsResult.apply,
       )
@@ -128,7 +130,7 @@ object HttpWorker:
         "Movie",
         j.movieId,
         MovieCachingDuration,
-        movieMemCache,
+        movieMemCacheOpt,
         mr.getMovieDetails,
         JobResult.MovieDetailsResult.apply,
       )
