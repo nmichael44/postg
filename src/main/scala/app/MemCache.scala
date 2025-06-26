@@ -240,10 +240,19 @@ object MemCache:
   ): F[Nothing] =
     val temporalAmount = timeTickInterval.toJava
 
+    val logGoingToSleep = U.logi(TimeTickWorkerName, s"'$memCacheName': Going to sleep until it's time to work...")
+    val logGoingToWork = U.logi(TimeTickWorkerName, s"'$memCacheName': is awake and going to work...")
+    val logResettingClock = U.logi(TimeTickWorkerName, "Resetting internal memCache clock!")
+    val logTickUpdated = U.logi(TimeTickWorkerName, s"TimeTick for '$memCacheName', updated!")
+
+    val logError =
+      val errMsg = s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run."
+      U.loge(_, TimeTickWorkerName, errMsg)
+
     (for {
-      - <- U.logi(TimeTickWorkerName, s"'$memCacheName': Going to sleep until it's time to work...")
+      - <- logGoingToSleep
       _ <- temporal.sleep(timeTickInterval)
-      _ <- U.logi(TimeTickWorkerName, s"'$memCacheName': is awake and going to work...")
+      _ <- logGoingToWork
       (timeOpt, newCounterVal) <- trueTimeUpdateCounter.get.map { c =>
         if c == UpdateNowWithTrueTimeAfterNUpdates then (Some(temporal.realTimeInstant), 0) else (None, c + 1)
       }
@@ -252,11 +261,9 @@ object MemCache:
       _ <- r.update { case CacheState(m, s, lruMap, seqCounter, now) =>
         CacheState(m, s, lruMap, seqCounter, newNowOpt.getOrElse(now.plus(temporalAmount)))
       }
-      _ <- (newCounterVal == 0).whenA(U.logi(TimeTickWorkerName, "Resetting internal memCache clock!"))
-      _ <- U.logi(TimeTickWorkerName, s"TimeTick for '$memCacheName', updated!")
-    } yield ()).handleErrorWith { e =>
-      U.loge(e, TimeTickWorkerName, s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run.")
-    }.foreverM
+      _ <- (newCounterVal == 0).whenA(logResettingClock)
+      _ <- logTickUpdated
+    } yield ()).handleErrorWith(logError).foreverM
 
   private def startTimeTickingWorker[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
