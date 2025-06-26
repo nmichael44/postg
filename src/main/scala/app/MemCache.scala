@@ -69,7 +69,7 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
     durationOpt match {
       case Some(d) if d.compareTo(MemCache.ItemMinimumAllowedDuration) < 0 =>
         temporal.raiseError(
-          new AssertionError(
+          new IllegalArgumentException(
             s"MemCache.put(): Duration cannot be less than ${TimeUtils.durationToString(MemCache.ItemMinimumAllowedDuration)}.",
           ), // We don't do NoStackTrace here because it's helpful to see the stack.
         )
@@ -125,22 +125,21 @@ object MemCache:
 
   private val TimeTickWorkerName: String = "TimeTickWorker"
 
-  private val ItemMinimumAllowedDuration: java.time.Duration =
-    java.time.Duration.of(10, java.time.temporal.ChronoUnit.SECONDS)
+  private val ItemMinimumAllowedDuration: java.time.Duration = 10.seconds.toJava
 
   private val MinimumCleanupDuration: FiniteDuration = 30.seconds
 
-  private val MinimumTimeTickDuration: FiniteDuration = 4.seconds
+  private val MinimumTimeTickDuration: FiniteDuration = 5.seconds
 
   // After how many updates with the approximate increment (coming from cats effect's sleep + scheduler)
   // do we correct the actual time.
   // Setting this to 0, results in using only true time.
-  private val UpdateNowWithTrueTimeAfterNUpdates: Int = 16
+  private val UpdateNowWithTrueTimeAfterNUpdates: Int = 32
 
   private def ensureMinCleanupDuration[F[_]: Temporal as temporal](cleanupDuration: FiniteDuration): F[Unit] =
     (cleanupDuration < MinimumCleanupDuration).whenA(
       temporal.raiseError(
-        new AssertionError(
+        new IllegalArgumentException(
           s"MemCache: Cleanup duration cannot be less than ${TimeUtils.durationToString(MinimumCleanupDuration)}.",
         ) with NoStackTrace,
       ),
@@ -149,7 +148,7 @@ object MemCache:
   private def ensureMinTimeTickDuration[F[_]: Temporal as temporal](timeTickDuration: FiniteDuration): F[Unit] =
     (timeTickDuration < MinimumTimeTickDuration).whenA(
       temporal.raiseError(
-        new AssertionError(
+        new IllegalArgumentException(
           s"MemCache: TimeTick duration cannot be less than ${TimeUtils.durationToString(MinimumTimeTickDuration)}.",
         ) with NoStackTrace,
       ),
@@ -172,14 +171,14 @@ object MemCache:
       timeTickingFiber <- startTimeTickingWorker(memCacheName, r, timeTickDuration)
     } yield MemCache(memCacheName, capacity, r, cleanupFiber, timeTickingFiber)
 
-  def createResource[F[_]: { Temporal, Logger }, K: Ordering, V](
+  def createResource[F[_]: { Temporal as temporal, Logger }, K: Ordering, V](
       memCacheName: String,
       capacity: Int,
       cleanupDuration: FiniteDuration,
       timeTickDuration: FiniteDuration,
   ): Resource[F, MemCache[F, K, V]] =
-    assert(capacity > 0, "Capacity must be greater than 0.")
-    Resource.make(create(memCacheName, capacity, cleanupDuration, timeTickDuration))(_.stopCleanupFiber())
+    if capacity <= 0 then Resource.raiseError(IllegalArgumentException("Capacity must be greater than 0."): Throwable)
+    else Resource.make(create(memCacheName, capacity, cleanupDuration, timeTickDuration))(_.stopCleanupFiber())
 
   private def hasExpired(expiry: Instant, now: Instant): Boolean =
     !now.isBefore(expiry)
@@ -202,9 +201,9 @@ object MemCache:
       cleanupInterval: FiniteDuration,
   ): F[Nothing] =
     (for {
-      _ <- U.logi(CleanupWorkerName, s"Cleanup worker for '$memCacheName', going to sleep until it's time to work...")
+      _ <- U.logi(CleanupWorkerName, s"'$memCacheName': Going to sleep until it's time to work...")
       _ <- temporal.sleep(cleanupInterval)
-      _ <- U.logi(CleanupWorkerName, s"Cleanup worker for '$memCacheName', is awake and going to work...")
+      _ <- U.logi(CleanupWorkerName, s"'$memCacheName': is awake and going to work...")
       _ <- reportSize(memCacheName, r, "before")
       _ <- r.update { case CacheState(m0, s0, lruMap0, seqCounter0, now) =>
         val expiredEntries = s0.view.takeWhile((expiry, _) => hasExpired(expiry, now)).toVector
@@ -220,12 +219,7 @@ object MemCache:
       }
       _ <- reportSize(memCacheName, r, "after")
     } yield ()).handleErrorWith { e =>
-      // We don't go paranoid and start worrying about errors being thrown from the logger...
-      U.loge(
-        e,
-        CleanupWorkerName,
-        s"MemCache cleanup worker for '$memCacheName', encountered an error during a cycle.  Worker will continue to run.",
-      )
+      U.loge(e, CleanupWorkerName, s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run.")
     }.foreverM
 
   private def startCleanupWorker[F[_]: { Temporal, Logger as logger }, K, V](
@@ -247,9 +241,9 @@ object MemCache:
     val temporalAmount = timeTickInterval.toJava
 
     (for {
-      - <- U.logi(TimeTickWorkerName, s"TimeTick worker for '$memCacheName', going to sleep until it's time to work...")
+      - <- U.logi(TimeTickWorkerName, s"'$memCacheName': Going to sleep until it's time to work...")
       _ <- temporal.sleep(timeTickInterval)
-      _ <- U.logi(TimeTickWorkerName, s"Cleanup worker for '$memCacheName', is awake and going to work...")
+      _ <- U.logi(TimeTickWorkerName, s"'$memCacheName': is awake and going to work...")
       (timeOpt, newCounterVal) <- trueTimeUpdateCounter.get.map { c =>
         if c == UpdateNowWithTrueTimeAfterNUpdates then (Some(temporal.realTimeInstant), 0) else (None, c + 1)
       }
@@ -258,13 +252,10 @@ object MemCache:
       _ <- r.update { case CacheState(m, s, lruMap, seqCounter, now) =>
         CacheState(m, s, lruMap, seqCounter, newNowOpt.getOrElse(now.plus(temporalAmount)))
       }
+      _ <- (newCounterVal == 0).whenA(U.logi(TimeTickWorkerName, "Resetting internal memCache clock!"))
       _ <- U.logi(TimeTickWorkerName, s"TimeTick for '$memCacheName', updated!")
     } yield ()).handleErrorWith { e =>
-      U.loge(
-        e,
-        TimeTickWorkerName,
-        s"MemCache timeTick worker for '$memCacheName', encountered an error during a cycle.  Worker will continue to run.",
-      )
+      U.loge(e, TimeTickWorkerName, s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run.")
     }.foreverM
 
   private def startTimeTickingWorker[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
@@ -295,7 +286,7 @@ object MemCache:
         _ <- cache.put("c", 3, timeoutDuration1)
 
         timeoutDuration2 = 3.seconds
-        _ <- logger.info(s"Putting key 'c' with timeout of $timeoutDuration2.")
+        _ <- logger.info(s"Putting key 'd' with timeout of $timeoutDuration2.")
         _ <- cache.put("d", 4, timeoutDuration2)
 
         _ <- logger.info("Getting key 'b' immediately after put.")
@@ -316,7 +307,7 @@ object MemCache:
 
         _ <- logger.info("Getting key 'c' after sleep (should be expired).")
         getC2 <- cache.get("c")
-        _ <- logger.info(s"Result for 'b' after sleep: $getC2") // Should be None
+        _ <- logger.info(s"Result for 'c' after sleep: $getC2") // Should be None
 
         _ <- logger.info("Getting key 'd' after sleep (should be expired).")
         getD2 <- cache.get("d")
@@ -328,17 +319,15 @@ object MemCache:
 
         _ <- logger.info("Getting key 'b' again (should still be present).")
         getB2 <- cache.get("b")
-        _ <- logger.info(s"Result for 'b' second time: $getB2") // Should still be Some(3)
+        _ <- logger.info(s"Result for 'b' second time: $getB2") // Should still be Some(2)
 
         // Note: The background worker is running and will eventually clean up 'b'.
         // The get check confirms it's treated as expired immediately based on time.
 
-        _ <- logger.info(
-          "MemCache test finished. The background worker will continue until the app exits.",
-        )
+        _ <- logger.info("MemCache test finished. The background worker will continue until the app exits.")
         _ <- temporal.sleep(11.seconds)
         // In a production scenario, using Resource would be better to ensure the
-        // background fiber is cancelled when the cache is no longer needed.
+        // background fiber is canceled when the cache is no longer needed.
         // IOApp.Simple handles the lifecycle of fibers started within 'run' implicitly.
       } yield ExitCode.Success
     }
