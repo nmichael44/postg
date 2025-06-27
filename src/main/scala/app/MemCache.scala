@@ -1,9 +1,9 @@
 package app
 
 import cats.{FlatMap, Functor}
-import cats.effect.{ExitCode, Temporal}
 import cats.effect.kernel.{Fiber, Ref, Resource}
 import cats.effect.syntax.all.*
+import cats.effect.Temporal
 import cats.implicits.*
 
 import java.time.Instant
