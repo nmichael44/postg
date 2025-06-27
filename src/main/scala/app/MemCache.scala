@@ -108,7 +108,7 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
     r.get.map { case CacheState(m, s, lruMap, seqCounter, now) => (m, s, lruMap, seqCounter, now) }
 
 object MemCache:
-  private final case class CacheState[K, V](
+  private final case class CacheState[K: Ordering, V](
       mainMap: TreeMap[K, CacheElem[V]],
       expirySet: TreeSet[(Instant, K)],
       lruMap: TreeMap[Long, K],
@@ -195,7 +195,7 @@ object MemCache:
 
   private val CleanupWorkerName: String = "CleanupWorker"
 
-  private def cleanupWorker[F[_]: { Temporal as temporal, Logger as logger }, K, V](
+  private def cleanupWorker[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
       cleanupInterval: FiniteDuration,
@@ -232,7 +232,7 @@ object MemCache:
       .handleErrorWith(logError)
       .foreverM
 
-  private def startCleanupWorker[F[_]: { Temporal, Logger as logger }, K, V](
+  private def startCleanupWorker[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
       cleanupInterval: FiniteDuration,
@@ -242,7 +242,7 @@ object MemCache:
     _ <- logger.info(s"Cleanup worker started for '$memCacheName'. Fiber is '$cleanupFiber'.")
   } yield cleanupFiber
 
-  private def timeTickWorker[F[_]: { Temporal as temporal, Logger as logger }, K, V](
+  private def timeTickWorker[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
       trueTimeUpdateCounter: Ref[F, Int],
@@ -280,7 +280,7 @@ object MemCache:
       .handleErrorWith(logError)
       .foreverM
 
-  private def startTimeTickingWorker[F[_]: { Temporal, Logger as logger }, K, V](
+  private def startTimeTickingWorker[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
       timeTickDuration: FiniteDuration,
