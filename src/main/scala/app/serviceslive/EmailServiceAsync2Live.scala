@@ -18,14 +18,14 @@ import emil.javamail.JavaMailEmil
 import org.typelevel.log4cats.Logger
 import retry.{retryingOnErrors, ErrorHandler, HandlerDecision, RetryPolicies, RetryPolicy}
 
-final class EmailServiceAsyncLive2[F[_]: Async] private (queue: Queue[F, Mail[F]]) extends EmailService[F]:
+final class EmailServiceAsync2Live[F[_]: Async] private (queue: Queue[F, Mail[F]]) extends EmailService[F]:
   override def sendEmail(email: Mail[F]): F[Unit] =
     queue.offer(email)
 
   override def sendEmail(emails: NonEmptyList[emil.Mail[F]]): F[Unit] =
     emails.toList.traverseVoid(sendEmail)
 
-object EmailServiceAsyncLive2:
+object EmailServiceAsync2Live:
   def create[F[_]: { Async as async, Logger as logger }](gmailConfig: GMailConfig): Resource[F, EmailService[F]] =
     val emil = JavaMailEmil[F]().asInstanceOf[JavaMailEmil[F]]
     val mailConf: MailConfig =
@@ -43,7 +43,7 @@ object EmailServiceAsyncLive2:
       queue <- Resource.eval(Queue.bounded[F, Mail[F]](EmailQueueSize))
       supervisedWorker = retryingOnErrors(workerAction(emil, mailConf, queue))(retryPolicy, errorHandler)
       _ <- Resource.make(supervisedWorker.start)(fiber => U.logi("Main Fiber", "Shutting down email worker.") *> fiber.cancel)
-    } yield new EmailServiceAsyncLive2[F](queue)
+    } yield new EmailServiceAsync2Live[F](queue)
 
   private def sendEmail[F[_]: { Async, Logger }](
       email: Mail[F],
@@ -56,22 +56,26 @@ object EmailServiceAsyncLive2:
       emil: JavaMailEmil[F],
       mailConf: MailConfig,
       queue: Queue[F, Mail[F]],
-  ): F[Unit] =
+  ): F[Unit] = {
+    val logEmailFound = logi("Email found. Attempting to send.")
+    val logEmailSend = logi("Email sent successfully!")
+    val onError = (e: Throwable, email: Mail[F]) =>
+      loge(e, "Exception thrown while sending email. Returning email to queue and reestablishing connection.") *>
+        queue.offer(email) *> async.raiseError[Unit](e)
+
     logi("Worker creating new connection") *>
       emil.connection(mailConf).use { connection =>
         val sender = emil.sender
         val processOneEmail = for {
           email <- queue.take
-          _ <- logi("Email found. Attempting to send.")
-          _ <- sendEmail(email, sender, connection).handleErrorWith { e =>
-            loge(e, "Exception thrown while sending email. Returning email to queue and reestablishing connection.") *>
-              queue.offer(email) *> async.raiseError(e)
-          }
-          _ <- logi("Email sent successfully!")
+          _ <- logEmailFound
+          _ <- sendEmail(email, sender, connection).handleErrorWith(onError(_, email))
+          _ <- logEmailSend
         } yield ()
 
         processOneEmail.foreverM
       }
+  }
 
   private val EmailWorkerName: String = "EmailWorker"
 

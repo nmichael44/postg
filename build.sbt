@@ -14,7 +14,7 @@ val catsEffectTestingScalatestVersion = "1.6.0"
 val jwtCirceVersion = "11.0.0"
 val password4jVersion = "1.8.3"
 val emilVersion = "0.19.0"
-val jMailVersion = "2.0.1"
+val jMailVersion = "2.0.2"
 val catsRetryVersion = "4.0.0"
 
 lazy val root = (project in file("."))

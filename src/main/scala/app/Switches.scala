@@ -44,14 +44,6 @@ object Switches:
       case None => throw AssertionError("Unimplemented instruction.")
     }
 
-  enum Omega derives CanEqual {
-    case O0
-    case O1
-    case O2
-    case O3
-    case O4
-  }
-
   // Dispatch in Scala is a disaster.
   def evalO(omega: Omega): Int =
     import scala.annotation.switch
@@ -62,3 +54,11 @@ object Switches:
       case Omega.O3 => 3
       case Omega.O4 => 4
     }
+
+  enum Omega derives CanEqual {
+    case O0
+    case O1
+    case O2
+    case O3
+    case O4
+  }

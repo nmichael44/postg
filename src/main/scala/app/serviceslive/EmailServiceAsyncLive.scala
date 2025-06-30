@@ -69,15 +69,20 @@ object EmailServiceAsyncLive:
       queue: Queue[F, Mail[F]],
       mailer: Emil.Run[F, ?],
   ): F[Fiber[F, Throwable, Nothing]] =
+    val sendEmailUntilQueueEmpty = sendUntilEmpty(queue, mailer)
+    val logGoingToSleep = logi("Going to sleep...")
+    val sleepForAWhile = async.sleep(WorkerSleepDuration)
+    val logAwakeAndReadyToWork = logi("Awake! Let's check if we have emails to send.")
+    val onError = loge(_, "Error while processing emails. Continuing...")
+
     val processUntilEmpty = for {
-      _ <- sendUntilEmpty(queue, mailer)
-      _ <- logi("Going to sleep...")
-      _ <- async.sleep(WorkerSleepDuration)
-      _ <- logi("Awake! Let's check if we have emails to send.")
+      _ <- sendEmailUntilQueueEmpty
+      _ <- logGoingToSleep
+      _ <- sleepForAWhile
+      _ <- logAwakeAndReadyToWork
     } yield ()
 
-    val processWithErrorHandling: F[Unit] =
-      processUntilEmpty.handleErrorWith(loge(_, "Error while processing emails. Continuing..."))
+    val processWithErrorHandling: F[Unit] = processUntilEmpty.handleErrorWith(onError)
 
     processWithErrorHandling.foreverM.start
 

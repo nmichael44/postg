@@ -46,11 +46,13 @@ object HttpWorker:
     def loge(e: Throwable, s: String): F[Unit] =
       uuidScope.get >>= (uuidOpt => uuidOpt.fold(U.loge(e, WorkerFiberName, s))(U.loge(e, WorkerFiberName, _, s)))
 
+    private val logFetchingDirectorsByName = logi("Fetching directors details by name")
+
     private def getDirectorsDetailsByName(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.GetDirectorsDetailsByName]
       val (firstName, lastName) = (j.firstName, j.lastName)
 
-      logi("Fetching directors details by name") *>
+      logFetchingDirectorsByName *>
         mr.getDirectorsDetails(firstName, lastName)
           .map(JobResult.DirectorsDetailsByNameResult.apply)
 
@@ -137,7 +139,7 @@ object HttpWorker:
 
       val movieId = j.movieId
       for {
-        _ <- logi(s"Fetching movie details for ID: $movieId")
+        _ <- logi(s"Fetching movie details for id: $movieId")
         movieDetailsMap <- mr.getMovieDetails(NonEmptyVector.one(movieId))
       } yield JobResult.MovieDetailsResult(movieDetailsMap.get(movieId))
 
@@ -168,14 +170,17 @@ object HttpWorker:
         .leftMap(CreateSystemUserError.BadPassword.apply)
         .toEitherT
 
+    private val logCreatingSystemUser: EitherT[F, Nothing, Unit] = logi("Creating system user.").lift
+    private val logCheckingPasswordValidity: EitherT[F, Nothing, Unit] = logi("Checking password validity.").lift
+
     private def createSystemUser(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.CreateSystemUser]
       val userDetails = j.userDetails
       val (loginName, password) = (userDetails.loginName, userDetails.password)
 
       val res: EitherT[F, CreateSystemUserError, Int] = for {
-        _ <- logi("Creating system user.").lift
-        _ <- logi("Checking password validity.").lift
+        _ <- logCreatingSystemUser
+        _ <- logCheckingPasswordValidity
 
         validatedPassword <- validatePassword(password)
 
@@ -190,25 +195,32 @@ object HttpWorker:
 
       res.value.map(JobResult.CreateSystemUserResult.apply)
 
+    private val logFetchingSystemUserByLoginName: F[Unit] = logi("Fetching system user by loginName.")
+
     private def fetchSystemUserByLoginName(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.FetchSystemUserByLoginName]
       val loginName = j.loginName
 
       for {
-        _ <- logi("Fetching system user by loginName.")
+        _ <- logFetchingSystemUserByLoginName
         res <- mr.fetchSystemUserByLoginName(loginName).map(_.toRight(FetchSystemUserError.NotFound))
       } yield JobResult.FetchSystemUserByLoginNameResult(res)
+
+    private val logFetchingSystemUserByUserId: F[Unit] = logi("Fetching system user by userId.")
 
     private def fetchSystemUserByUserId(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.FetchSystemUserByUserId]
       val userIdStr = j.userIdStr
 
       for {
-        _ <- logi("Fetching system user by userId.")
+        _ <- logFetchingSystemUserByUserId
         res <- userIdStr.toIntOption.fold(async.pure(Left(FetchSystemUserError.BadInput))) { userId =>
           mr.fetchSystemUserByUserId(userId).map(_.toRight(FetchSystemUserError.NotFound))
         }
       } yield JobResult.FetchSystemUserByUserIdResult(res)
+
+    private val logLoginFailed: LoginRequestError => F[Unit] = _ => logi("Login failed. Invalid password!")
+    private val logLoginSuccessful: Boolean => F[Unit] = _ => logi("Login was successful!")
 
     private def processLoginRequest(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.LoginRequest]
@@ -221,7 +233,7 @@ object HttpWorker:
           .checkPassword(password, userDetails.hashedPassword)
           .lift
           .ensure(LoginRequestError.InvalidLoginPassword)(identity)
-          .biSemiflatTap(_ => logi("Login failed. Invalid password!"), _ => logi("Login was successful!"))
+          .biSemiflatTap(logLoginFailed, logLoginSuccessful)
 
         token <- authService.createToken(userDetails, List("silly", "permissions", "for", "now", "!")).lift
       } yield token
@@ -274,36 +286,39 @@ object HttpWorker:
       queue: Queue[F, Job[F]],
       jobExecutor: JobExecutor[F],
   ): F[Nothing] =
+    val logWaitingForWork = jobExecutor.logi("Waiting for work.")
+    val logSendingResultsBack = jobExecutor.logi("Done. Sending results back...")
+    val getJobFromQueue = queue.take.map(j => (j.job, j.deferred, j.uuid))
+    val onErrorInner = jobExecutor.loge(_, "Error while processing job. The job will be dropped.")
+    val onErrorOuter = (e: Throwable) =>
+      jobExecutor.loge(e, "A non-recoverable error occurred in the worker loop. Restarting....") *>
+        async.sleep(500.milliseconds)
+
     val processOneJob: F[Unit] = for {
-      _ <- jobExecutor.logi("Waiting for work.")
-      (job, deferred, uuid) <- queue.take.map(j => (j.job, j.deferred, j.uuid))
+      _ <- logWaitingForWork
+      (job, deferred, uuid) <- getJobFromQueue
       _ <- jobExecutor.uuidScope.scope(Some(uuid)).use { _ =>
         val jobExecution: F[Unit] = for {
           _ <- jobExecutor.logi(s"Starting to work on ${job.shortName}...")
           outcome <- jobExecutor.executeJob(job).attempt
-          _ <- jobExecutor.logi("Done. Sending results back...")
+          _ <- logSendingResultsBack
           _ <- deferred.complete(outcome)
         } yield ()
 
         // Inner Handler: Catches errors for a specific job.
         // It logs with the trace ID and allows the worker to continue immediately.
-        jobExecution.handleErrorWith { e =>
-          jobExecutor.loge(e, "Error while processing job. The job will be dropped.")
-        }
+        jobExecution.handleErrorWith(onErrorInner)
       }
     } yield ()
 
     // Outer handler.
     // This keeps the worker fiber from dying in case something happened outside the scope of the
     // inner handler (for example, while waiting on the queue).
-    val processSafely = processOneJob.handleErrorWith { e =>
-      jobExecutor.loge(e, "A non-recoverable error occurred in the worker loop. Restarting....") *>
-        async.sleep(1.second)
-    }
+    val processSafely = processOneJob.handleErrorWith(onErrorOuter)
 
     processSafely.foreverM
 
-  def startWorkers[F[_]: { Async, Logger }](deps: AppDependencies[F]): F[Unit] =
+  def createWorkers[F[_]: { Async, Logger }](deps: AppDependencies[F]): F[Unit] =
     val serverState = deps.serverState
 
     val jobExecutor: JobExecutor[F] =
