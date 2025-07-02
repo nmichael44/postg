@@ -428,13 +428,15 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
     Router[F](publicRoutesPath, apiRoutesPath).orNotFound
 
 object MovieApp:
-  private def getServerHostIPPort(serverConnectionConfig: ServerConnectionConfig): (Ipv4Address, Port) =
+  private def getServerHostIPPort[F[_]: Async as async](
+      serverConnectionConfig: ServerConnectionConfig,
+  ): F[(Ipv4Address, Port)] =
     val (host, port) = (serverConnectionConfig.getHost, serverConnectionConfig.getPort)
 
     (Ipv4Address.fromString(host), Port.fromInt(port)) match {
-      case (Some(ipv4Address), Some(port)) => (ipv4Address, port)
-      case (None, _) => throw AssertionError(s"Illegal ServerHostIP: '$host'.")
-      case (_, None) => throw AssertionError(s"Illegal ServerHostPort: '$port'.")
+      case (Some(ipv4Address), Some(port)) => async.pure((ipv4Address, port))
+      case (None, _) => async.raiseError(AssertionError(s"Illegal ServerHostIP: '$host'."))
+      case (_, None) => async.raiseError(AssertionError(s"Illegal ServerHostPort: '$port'."))
     }
 
   private def ensureOnlyAllowedParams[F[_]: Applicative as app](
@@ -565,14 +567,15 @@ object MovieApp:
 
   private def createServer[F[_]: { Async as async, Network, Logger }](deps: AppDependencies[F]): F[ExitCode] =
     val serverConnectionConfig = deps.appConfig.getServerConnectionConfig
-    val (serverHostIP, serverHostPort) = getServerHostIPPort(serverConnectionConfig)
     val keyStoreFile = serverConnectionConfig.getKeystoreFile
     val keyStorePassword = serverConnectionConfig.getKeystorePassword
     val httpApp = createHttpApp[F](deps)
 
-    createServerResource(serverHostIP, serverHostPort, keyStoreFile, keyStorePassword, httpApp)
-      .use(server => U.logi(MainFiberName, s"Server started with base uri: '${server.baseUri.toString}'.") *> async.never)
-      .as(ExitCode.Success)
+    getServerHostIPPort[F](serverConnectionConfig) >>= { (serverHostIP, serverHostPort) =>
+      createServerResource(serverHostIP, serverHostPort, keyStoreFile, keyStorePassword, httpApp)
+        .use(server => U.logi(MainFiberName, s"Server started with base uri: '${server.baseUri.toString}'.") *> async.never)
+        .as(ExitCode.Success)
+    }
 
   // This is the number of redirects Ember will perform when a response
   // specifies that it needs a redirection.
