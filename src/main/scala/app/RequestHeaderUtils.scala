@@ -6,7 +6,7 @@ import org.http4s.Request
 import org.typelevel.ci.*
 
 object RequestHeaderUtils:
-  def getHeaderValue[F[_]](req: Request[F], keyName: CIString): Option[NonEmptyList[String]] =
+  private def getHeaderValue[F[_]](req: Request[F], keyName: CIString): Option[NonEmptyList[String]] =
     // Fetch all matching headers
     req.headers.get(keyName).map(_.map(_.value))
 
