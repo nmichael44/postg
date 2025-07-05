@@ -68,20 +68,21 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
   private val logNotFound: F[Unit] = logi("... not found -- generating.")
   private val logFound: F[Unit] = logi("... found!")
 
+  private def getUUIDForRequest(req: Request[F], uuidGen: UUIDGenerator[F]): F[String] =
+    RequestHeaderUtils.getXRequestId(req)
+      .fold(logNotFound *> uuidGen.generateUUIDAsString) { headerUuid =>
+        logFound *> async.pure(headerUuid)
+      }
+
   private def jobHandler[T <: JobResult](
       req: Request[F],
       serverState: ServerState[F],
       uuidGen: UUIDGenerator[F],
       job: JobKind,
       f: T => WebServiceResult,
-  ): F[WebServiceResult] =
-    val res: F[Either[Throwable, JobResult]] = for {
+  ): F[WebServiceResult] = for {
       _ <- logFindingXRequestIdHeader
-      uuid <- RequestHeaderUtils
-        .getXRequestId(req)
-        .fold(logNotFound *> uuidGen.generateUUIDAsString) { headerUuid =>
-          logFound *> async.pure(headerUuid)
-        }
+      uuid <- getUUIDForRequest(req, uuidGen)
       _ <- logi(uuid, "Processing request.")
       deferred <- DeferredF
       _ <- logi(uuid, "Request being queued.")
@@ -93,9 +94,7 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
         case Right(_) => logi(uuid, "Successful response.")
         case Left(e) => loge(e, uuid, "Failed with exception.")
       }
-    } yield outcome
-
-    res.map(mkResponse[T](_, f))
+    } yield mkResponse(outcome, f)
 
   private def mkResponse[T](
       resEither: Either[Throwable, JobResult],
@@ -122,6 +121,8 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
         )
       }
 
+  private val DirectorNotFound: WebServiceResult = WebServiceResult.NotFoundRes("Director not found")
+
   private def getDirectorDetails(
       serverState: ServerState[F],
       ctxReq: ContextRequest[F, AuthenticatedUser],
@@ -133,8 +134,10 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
       serverState,
       uuidGen,
       GetDirectorDetails(directorId),
-      _.director.fold(WebServiceResult.NotFoundRes("Director not found"))(dir => WebServiceResult.OkJsonRes(dir.asJson)),
+      _.director.fold(DirectorNotFound)(dir => WebServiceResult.OkJsonRes(dir.asJson)),
     )
+
+  private val ActorNotFound: WebServiceResult = WebServiceResult.NotFoundRes("Actor not found")
 
   private def getActorDetails(
       serverState: ServerState[F],
@@ -147,7 +150,7 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
       serverState,
       uuidGen,
       GetActorDetails(actorId),
-      _.actor.fold(WebServiceResult.NotFoundRes("Actor not found"))(act => WebServiceResult.OkJsonRes(act.asJson)),
+      _.actor.fold(ActorNotFound)(act => WebServiceResult.OkJsonRes(act.asJson)),
     )
 
   private val firstNameParam: String = "firstName"
@@ -178,6 +181,8 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
       mvs => WebServiceResult.OkJsonRes(mvs.asJson),
     )
 
+  private val MovieNotFound: WebServiceResult = WebServiceResult.NotFoundRes("Movie not found")
+
   private def getMovie(
       serverState: ServerState[F],
       ctxReq: ContextRequest[F, AuthenticatedUser],
@@ -189,7 +194,7 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
       serverState,
       uuidGen,
       GetMovie(movieId),
-      _.movie.fold(WebServiceResult.NotFoundRes("Movie not found"))(mv => WebServiceResult.OkJsonRes(mv.asJson)),
+      _.movie.fold(MovieNotFound)(mv => WebServiceResult.OkJsonRes(mv.asJson)),
     )
 
   private def getMovieWithCounting(
