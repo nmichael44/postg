@@ -56,6 +56,18 @@ object HttpWorker:
         mr.getDirectorsDetails(firstName, lastName)
           .map(JobResult.DirectorsDetailsByNameResult.apply)
 
+    private def writeItemToCache[T](
+        cacheOpt: Option[MemCache[F, Long, T]],
+        id: Long,
+        item: T,
+        itemName: String,
+        cachingDuration: FiniteDuration,
+    ): F[Unit] =
+      cacheOpt.fold(().pure) { cache =>
+        logi(s"Putting $itemName for ID: $id in cache.") *>
+          cache.put(id, item, cachingDuration)
+      }
+
     private def getDetailsWithCache[T](
         itemName: String,
         id: Long,
@@ -77,12 +89,9 @@ object HttpWorker:
               logi(s"$itemName details for ID: $id Fetching from DB.") *>
               f(NonEmptyVector.one(id)) >>= { itemDetailsMap =>
               itemDetailsMap.get(id) match {
-                case Some(item) =>
+                case p @ Some(item) =>
                   logi(s"$itemName details for ID: $id found in DB.") *>
-                    cacheOpt.map { cache =>
-                      logi(s"Putting $itemName for ID: $id in cache.") *>
-                        cache.put(id, item, cachingDuration).as(item)
-                    }.sequence
+                    writeItemToCache(cacheOpt, id, item, itemName, cachingDuration).as(p)
                 case None =>
                   logi(s"$itemName details for ID: $id not found in DB.").as(None)
               }

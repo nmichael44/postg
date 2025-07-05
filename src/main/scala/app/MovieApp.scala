@@ -24,7 +24,6 @@ import fs2.io.net.Network
 import io.circe.*
 import io.circe.generic.auto.*
 import io.circe.syntax.*
-import org.checkerframework.framework.qual.PostconditionAnnotation
 import org.http4s
 import org.http4s.*
 import org.http4s.circe.*
@@ -62,6 +61,13 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
   private def logi(uuid: String, s: String): F[Unit] =
     U.logi(FiberName, uuid, s)
 
+  private val DeferredF: F[Deferred[F, Either[Throwable, JobResult]]] =
+    Deferred[F, Either[Throwable, JobResult]]
+
+  private val logFindingXRequestIdHeader: F[Unit] = logi("Finding XRequestId header.")
+  private val logNotFound: F[Unit] = logi("... not found -- generating.")
+  private val logFound: F[Unit] = logi("... found!")
+
   private def jobHandler[T <: JobResult](
       req: Request[F],
       serverState: ServerState[F],
@@ -70,14 +76,14 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
       f: T => WebServiceResult,
   ): F[WebServiceResult] =
     val res: F[Either[Throwable, JobResult]] = for {
-      _ <- logi("Finding XRequestId header.")
+      _ <- logFindingXRequestIdHeader
       uuid <- RequestHeaderUtils
         .getXRequestId(req)
-        .fold(logi("... not found -- generating.") *> uuidGen.generateUUIDAsString) { headerUuid =>
-          logi("... found!") *> async.pure(headerUuid)
+        .fold(logNotFound *> uuidGen.generateUUIDAsString) { headerUuid =>
+          logFound *> async.pure(headerUuid)
         }
       _ <- logi(uuid, "Processing request.")
-      deferred <- Deferred[F, Either[Throwable, JobResult]]
+      deferred <- DeferredF
       _ <- logi(uuid, "Request being queued.")
       _ <- serverState.jobQueue.offer(HttpWorker.Job(job, deferred, uuid))
       _ <- logi(uuid, "Waiting for response.")

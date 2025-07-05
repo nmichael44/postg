@@ -2,12 +2,11 @@ package app
 
 import cats.{Applicative, Functor, Monad, Monoid}
 import cats.implicits.*
-import cats.syntax.*
 
 import scala.annotation.tailrec
 
 object CatsEx:
-  final case class Neo[T](val n: T)
+  final case class Neo[T](n: T)
 
   given [T: Monoid]: Monoid[Neo[T]] with
     override def combine(x: Neo[T], y: Neo[T]): Neo[T] = Neo(x.n |+| y.n)

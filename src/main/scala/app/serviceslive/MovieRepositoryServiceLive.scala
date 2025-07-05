@@ -13,7 +13,8 @@ import doobie.postgres.implicits.*
 import doobie.util.transactor.Transactor
 import org.postgresql.util.PSQLException
 
-private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transactor[F]) extends MovieRepositoryService[F]:
+private final class MovieRepositoryServiceLive[F[_]: Async as async] private (xa: Transactor[F])
+    extends MovieRepositoryService[F]:
   override def getDirectorsDetails(
       firstName: Option[String],
       lastName: Option[String],
@@ -101,12 +102,11 @@ private final class MovieRepositoryServiceLive[F[_]: Async] private (xa: Transac
     sql"""insert into systemUsers (loginName, hashedPassword) values($loginName, $hashedPassword)""".update
       .withUniqueGeneratedKeys[Int]("userid")
       .attempt
-      .map {
-        case Right(userId) =>
-          Right(userId)
+      .flatMap {
+        case Right(userId) => Right(userId).pure
         case Left(e: PSQLException) if e.getSQLState == PostgresDuplicateValueSqlState =>
-          Left(DBError.DuplicateLoginName(loginName))
-        case Left(e) => throw e
+          Left(DBError.DuplicateLoginName(loginName)).pure
+        case Left(e) => doobie.FC.raiseError(e)
       }
       .transact(xa)
 
