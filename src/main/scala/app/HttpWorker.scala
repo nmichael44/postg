@@ -56,6 +56,8 @@ object HttpWorker:
         mr.getDirectorsDetails(firstName, lastName)
           .map(JobResult.DirectorsDetailsByNameResult.apply)
 
+    private val unit: F[Unit] = async.unit
+
     private def writeItemToCache[T](
         cacheOpt: Option[MemCache[F, Long, T]],
         id: Long,
@@ -63,7 +65,7 @@ object HttpWorker:
         itemName: String,
         cachingDuration: FiniteDuration,
     ): F[Unit] =
-      cacheOpt.fold(().pure) { cache =>
+      cacheOpt.fold(unit) { cache =>
         logi(s"Putting $itemName for ID: $id in cache.") *>
           cache.put(id, item, cachingDuration)
       }
