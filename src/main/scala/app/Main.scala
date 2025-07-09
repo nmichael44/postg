@@ -15,6 +15,7 @@ object Main extends IOApp:
 //    }
 //    println(k)
 //    println("Warm-up complete. The assembly code should have been printed.")
-    // MovieApp.run
-    Refs.run(args)
+    MovieApp.run
+    // ReturningThis
+    // Refs.run(args)
 //    IO.pure(ExitCode.Success)

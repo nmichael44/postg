@@ -10,28 +10,26 @@ import java.util.random.RandomGenerator
 import app.UUIDGenerator.{makeV4UUID, RandomnessSource}
 
 final class UUIDGenerator[F[_]: Async] private (queue: Queue[F, RandomnessSource[F]]):
-  private val withItemFromQueue: Resource[F, RandomnessSource[F]] = Resource.make(queue.take)(queue.offer)
+  private val withItemFromQueue: Resource[F, RandomnessSource[F]] =
+    Resource.make(queue.take)(queue.offer)
 
-  private val generateUUID: F[UUID] =
-    withItemFromQueue.use { rndSrc =>
-      for {
-        msb <- rndSrc.nextLong()
-        lsb <- rndSrc.nextLong()
-      } yield makeV4UUID(msb, lsb)
-    }
+  private val generateUUID: F[UUID] = withItemFromQueue.use { rndSrc =>
+    for {
+      msb <- rndSrc.nextLong()
+      lsb <- rndSrc.nextLong()
+    } yield makeV4UUID(msb, lsb)
+  }
 
   val generateUUIDAsString: F[String] = generateUUID.map(_.toString)
 
 object UUIDGenerator:
   private final class RandomnessSource[F[_]: Async as async](rng: RandomGenerator):
-    def nextLong(): F[Long] =
-      async.delay(rng.nextLong())
+    def nextLong(): F[Long] = async.delay(rng.nextLong())
 
-  private def makeV4UUID(msb: Long, lsb: Long): UUID =
-    UUID(
-      (msb & 0xffffffffffff0fffL) | 0x0000000000040000L,
-      (lsb & 0x3fffffffffffffffL) | 0x8000000000000000L,
-    )
+  private def makeV4UUID(msb: Long, lsb: Long): UUID = UUID(
+    (msb & 0xffffffffffff0fffL) | 0x0000000000040000L,
+    (lsb & 0x3fffffffffffffffL) | 0x8000000000000000L,
+  )
 
   // How many random number generators are available for use.  If that there more than
   // LevelOfParallelism requests at the same time, the next fiber will wait until one

@@ -1,7 +1,7 @@
 package app.serviceslive
 
 import cats.data.NonEmptyList
-import cats.effect.{Async, Resource}
+import cats.effect.{Async, Fiber, Resource}
 import cats.effect.std.Queue
 import cats.effect.syntax.all.*
 import cats.implicits.*
@@ -26,63 +26,69 @@ final class EmailServiceAsync2Live[F[_]: Async] private (queue: Queue[F, Mail[F]
     emails.toList.traverseVoid(sendEmail)
 
 object EmailServiceAsync2Live:
-  def create[F[_]: { Async as async, Logger as logger }](gmailConfig: GMailConfig): Resource[F, EmailService[F]] =
-    val emil = JavaMailEmil[F]().asInstanceOf[JavaMailEmil[F]]
+  def create[F[_]: { Async as async, Logger }](gmailConfig: GMailConfig): Resource[F, EmailService[F]] =
+    val emil: JavaMailEmil[F] = JavaMailEmil[F]().asInstanceOf[JavaMailEmil[F]]
     val mailConf: MailConfig =
       MailConfig.gmailSmtp(gmailConfig.getEmailUser, gmailConfig.getEmailUserPassword)
 
-    val retryPolicy: RetryPolicy[F, Throwable] =
-      RetryPolicies.capDelay(4.minutes, RetryPolicies.fibonacciBackoff[F](2.seconds))
-
-    val errorHandler: ErrorHandler[F, Unit] =
-      (err, details) =>
-        loge(err, s"Worker lifecycle failed. Restarting... Details: $details")
-          .as(HandlerDecision.Continue)
-
     for {
       queue <- Resource.eval(Queue.bounded[F, Mail[F]](EmailQueueSize))
-      supervisedWorker = retryingOnErrors(workerAction(emil, mailConf, queue))(retryPolicy, errorHandler)
-      _ <- Resource.make(supervisedWorker.start)(fiber => U.logi("Main Fiber", "Shutting down email worker.") *> fiber.cancel)
+      _ <- Resource.make(startWorker(queue, emil, mailConf))(stopWorker)
     } yield new EmailServiceAsync2Live[F](queue)
 
-  private def sendEmail[F[_]: { Async, Logger }](
-      email: Mail[F],
-      sender: Send[F, JavaMailConnection],
-      connection: JavaMailConnection,
-  ): F[Unit] =
-    sender.sendMails(NonEmptyList.one(email)).run(connection).void
-
-  private def workerAction[F[_]: { Async as async, Logger }](
+  private def startWorker[F[_]: { Async as async, Logger }](
+      queue: Queue[F, Mail[F]],
       emil: JavaMailEmil[F],
       mailConf: MailConfig,
+  ): F[Fiber[F, Throwable, Unit]] =
+    val retryPolicy: RetryPolicy[F, Throwable] =
+      RetryPolicies.capDelay(3.minutes, RetryPolicies.fibonacciBackoff[F](1.seconds))
+
+    val errorHandler: ErrorHandler[F, Unit] = (err, details) =>
+      U.loge(err, "RetryFiber", s"Worker lifecycle failed. Restarting... Details: $details")
+        .as(HandlerDecision.Continue)
+
+    val emailWorker = EmailWorker(queue, emil, mailConf)
+    retryingOnErrors(emailWorker.go)(retryPolicy, errorHandler).start
+
+  private def stopWorker[F[_]: { Async, Logger }](fiber: Fiber[F, Throwable, Unit]) =
+    U.logi("MainFiber", "Shutting down email worker.") *> fiber.cancel
+
+  private final val EmailQueueSize: Int = 128
+
+  private final class EmailWorker[F[_]: { Async as async, Logger }](
       queue: Queue[F, Mail[F]],
-  ): F[Unit] = {
-    val logEmailFound = logi("Email found. Attempting to send.")
-    val logEmailSend = logi("Email sent successfully!")
-    val onError = (e: Throwable, email: Mail[F]) =>
+      emil: JavaMailEmil[F],
+      mailConf: MailConfig,
+  ):
+    private def sendEmail(email: Mail[F], sender: Send[F, JavaMailConnection], connection: JavaMailConnection): F[Unit] =
+      sender.sendMails(NonEmptyList.one(email)).run(connection).void
+
+    private val logEmailFound = logi("Email found. Attempting to send.")
+    private val logEmailSend = logi("Email sent successfully!")
+    private val logWorkerCreatingNewConnection = logi("Worker creating new connection")
+
+    private def onError(email: Mail[F]) = (e: Throwable) =>
       loge(e, "Exception thrown while sending email. Returning email to queue and reestablishing connection.") *>
         queue.offer(email) *> async.raiseError[Unit](e)
 
-    logi("Worker creating new connection") *>
-      emil.connection(mailConf).use { connection =>
-        val sender = emil.sender
-        val processOneEmail = for {
-          email <- queue.take
-          _ <- logEmailFound
-          _ <- sendEmail(email, sender, connection).handleErrorWith(onError(_, email))
-          _ <- logEmailSend
-        } yield ()
+    val go: F[Unit] =
+      logWorkerCreatingNewConnection *>
+        emil.connection(mailConf).use { connection =>
+          val sender = emil.sender
 
-        processOneEmail.foreverM
-      }
-  }
+          (for {
+            email <- queue.take
+            _ <- logEmailFound
+            _ <- sendEmail(email, sender, connection).handleErrorWith(onError(email))
+            _ <- logEmailSend
+          } yield ()).foreverM
+        }
 
-  private val EmailWorkerName: String = "EmailWorker"
+    private val EmailWorkerName: String = "EmailWorkerFiber"
 
-  private val EmailQueueSize: Int = 128
+    private def logi(s: String): F[Unit] =
+      U.logi(EmailWorkerName, s)
 
-  private def logi[F[_]: Logger](s: String): F[Unit] =
-    U.logi(EmailWorkerName, s)
-
-  private def loge[F[_]: Logger](e: Throwable, s: String): F[Unit] =
-    U.loge(e, EmailWorkerName, s)
+    private def loge(e: Throwable, s: String): F[Unit] =
+      U.loge(e, EmailWorkerName, s)

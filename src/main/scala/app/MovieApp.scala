@@ -11,7 +11,7 @@ import cats.Applicative
 import scala.concurrent.duration.*
 import scala.util.control.NoStackTrace
 
-import app.serviceslive.{AuthServiceLive, EmailServiceAsync2Live, EmailServiceAsyncLive, EmailServiceLive, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
+import app.serviceslive.{AuthServiceLive, EmailServiceAsync2Live, ExternalApiClientServiceLive, FileSystemServiceLive, MovieRepositoryServiceLive, ServerStateUpdateServiceLive}
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig, ServerConnectionConfig}
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult}
 import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest, SendEmail}
@@ -38,11 +38,11 @@ import org.http4s.headers.{`WWW-Authenticate`, Authorization}
 import org.http4s.implicits.*
 import org.http4s.server.{AuthMiddleware, Router}
 import org.typelevel.ci.CIString
-import org.typelevel.log4cats.{Logger, LoggerName, SelfAwareStructuredLogger}
+import org.typelevel.log4cats.{Logger, LoggerName}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
 import services.{AuthService, EmailService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
-import MovieApp.{AppDependencies, MemCaches, Render, WebServiceResult}
+import MovieApp.{AppDependencies, Render, WebServiceResult}
 import MovieDbModel.AuthenticatedUser
 
 final class MovieApp[F[_]: { Async as async, Logger as logger }](
@@ -69,7 +69,8 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
   private val logFound: F[Unit] = logi("... found!")
 
   private def getUUIDForRequest(req: Request[F], uuidGen: UUIDGenerator[F]): F[String] =
-    RequestHeaderUtils.getXRequestId(req)
+    RequestHeaderUtils
+      .getXRequestId(req)
       .fold(logNotFound *> uuidGen.generateUUIDAsString) { headerUuid =>
         logFound *> async.pure(headerUuid)
       }
@@ -81,20 +82,20 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
       job: JobKind,
       f: T => WebServiceResult,
   ): F[WebServiceResult] = for {
-      _ <- logFindingXRequestIdHeader
-      uuid <- getUUIDForRequest(req, uuidGen)
-      _ <- logi(uuid, "Processing request.")
-      deferred <- DeferredF
-      _ <- logi(uuid, "Request being queued.")
-      _ <- serverState.jobQueue.offer(HttpWorker.Job(job, deferred, uuid))
-      _ <- logi(uuid, "Waiting for response.")
-      outcome <- deferred.get // Wait for the answer
-      _ <- logi(uuid, "Response received.")
-      _ <- outcome match {
-        case Right(_) => logi(uuid, "Successful response.")
-        case Left(e) => loge(e, uuid, "Failed with exception.")
-      }
-    } yield mkResponse(outcome, f)
+    _ <- logFindingXRequestIdHeader
+    uuid <- getUUIDForRequest(req, uuidGen)
+    _ <- logi(uuid, "Processing request.")
+    deferred <- DeferredF
+    _ <- logi(uuid, "Request being queued.")
+    _ <- serverState.jobQueue.offer(HttpWorker.Job(job, deferred, uuid))
+    _ <- logi(uuid, "Waiting for response.")
+    outcome <- deferred.get // Wait for the answer
+    _ <- logi(uuid, "Response received.")
+    _ <- outcome match {
+      case Right(_) => logi(uuid, "Successful response.")
+      case Left(e) => loge(e, uuid, "Failed with exception.")
+    }
+  } yield mkResponse(outcome, f)
 
   private def mkResponse[T](
       resEither: Either[Throwable, JobResult],
