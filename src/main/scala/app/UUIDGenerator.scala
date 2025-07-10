@@ -38,20 +38,17 @@ object UUIDGenerator:
 
   private def populateQueue[F[_]: Async as async](queue: Queue[F, RandomnessSource[F]], seedOpt: Option[Long]): F[Unit] =
     for {
-      nanos <- seedOpt.map(_.pure).getOrElse(async.monotonic.map(_.toNanos))
+      nanos <- seedOpt.map(async.pure).getOrElse(async.monotonic.map(_.toNanos))
       masterRng = SplittableRandom(nanos)
       _ <- queue.offer(RandomnessSource[F](masterRng))
-      _ <- (1 until LevelOfParallelism).toVector.traverseVoid { _ =>
-        queue.offer(RandomnessSource[F](masterRng.split()))
-      }
+      _ <- async.replicateA_(LevelOfParallelism - 1, async.defer(queue.offer(RandomnessSource[F](masterRng.split()))))
     } yield ()
 
-  private def createImpl[F[_]: Async](seedOpt: Option[Long]): Resource[F, UUIDGenerator[F]] =
+  private def createImpl[F[_]: Async as async](seedOpt: Option[Long]): Resource[F, UUIDGenerator[F]] =
     Resource.eval {
-      for {
-        queue <- Queue.bounded[F, RandomnessSource[F]](LevelOfParallelism)
-        _ <- populateQueue(queue, seedOpt)
-      } yield UUIDGenerator[F](queue)
+      Queue.bounded[F, RandomnessSource[F]](LevelOfParallelism) >>= (queue =>
+        populateQueue(queue, seedOpt) *> async.pure(UUIDGenerator[F](queue))
+      )
     }
 
   def create[F[_]: Async]: Resource[F, UUIDGenerator[F]] =
