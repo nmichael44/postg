@@ -65,6 +65,8 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
       (m1, s1, lru1)
     else (m0, s0, lru0)
 
+  private val unit: F[Unit] = temporal.pure(())
+
   private def checkDuration(durationOpt: Option[java.time.Duration]): F[Unit] =
     durationOpt match {
       case Some(d) if d.compareTo(MemCache.ItemMinimumAllowedDuration) < 0 =>
@@ -73,7 +75,7 @@ final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Orderi
             s"MemCache.put(): Duration cannot be less than ${TimeUtils.durationToString(MemCache.ItemMinimumAllowedDuration)}.",
           ), // We don't do NoStackTrace here because it's helpful to see the stack.
         )
-      case _ => temporal.pure(())
+      case _ => unit
     }
 
   private def putAux(k: K, v: V, durationOpt: Option[java.time.Duration]): F[Unit] =
@@ -134,7 +136,7 @@ object MemCache:
   // After how many updates with the approximate increment (coming from cats effect's sleep + scheduler)
   // do we correct the actual time.
   // Setting this to 0, results in using only true time.
-  private val UpdateNowWithTrueTimeAfterNUpdates: Int = 32
+  inline private val UpdateNowWithTrueTimeAfterNUpdates = 32
 
   private def ensureMinCleanupDuration[F[_]: Temporal as temporal](cleanupDuration: FiniteDuration): F[Unit] =
     (cleanupDuration < MinimumCleanupDuration).whenA(
@@ -200,15 +202,17 @@ object MemCache:
       r: Ref[F, CacheState[K, V]],
       cleanupInterval: FiniteDuration,
   ): F[Nothing] =
-    val logGoingToSleep = U.logi(CleanupWorkerName, s"'$memCacheName': Going to sleep until it's time to work...")
-    val logAwakeGoingToWork = U.logi(CleanupWorkerName, s"'$memCacheName': is awake and going to work...")
+    val logi = U.logi(CleanupWorkerName, _)
+    val loge = U.loge(_, CleanupWorkerName, _)
+
+    val logGoingToSleep = logi(s"'$memCacheName': Going to sleep until it's time to work...")
+    val logAwakeGoingToWork = logi(s"'$memCacheName': is awake and going to work...")
     val reportSizeBefore = reportSize(memCacheName, r, "before")
     val reportSizeAfter = reportSize(memCacheName, r, "after")
     val sleepForCleanupInterval = temporal.sleep(cleanupInterval)
 
-    val logError =
-      val errMsg = s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run."
-      U.loge(_, CleanupWorkerName, errMsg)
+    val errMsg = s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run."
+    val logError = loge(_, errMsg)
 
     (for {
       _ <- logGoingToSleep
@@ -248,21 +252,24 @@ object MemCache:
       trueTimeUpdateCounter: Ref[F, Int],
       timeTickInterval: FiniteDuration,
   ): F[Nothing] =
+    val logi = U.logi(TimeTickWorkerName, _)
+    val loge = U.loge(_, TimeTickWorkerName, _)
+
     val temporalAmount = timeTickInterval.toJava
 
-    val logGoingToSleep = U.logi(TimeTickWorkerName, s"'$memCacheName': Going to sleep until it's time to work...")
-    val logGoingToWork = U.logi(TimeTickWorkerName, s"'$memCacheName': is awake and going to work...")
-    val logResettingClock = U.logi(TimeTickWorkerName, "Resetting internal memCache clock!")
-    val logTickUpdated = U.logi(TimeTickWorkerName, s"TimeTick for '$memCacheName', updated!")
+    val logGoingToSleep = logi(s"'$memCacheName': Going to sleep until it's time to work...")
+    val logGoingToWork = logi(s"'$memCacheName': is awake and going to work...")
+    val logResettingClock = logi("Resetting internal memCache clock!")
+    val logTickUpdated = logi(s"TimeTick for '$memCacheName', updated!")
     val sleepForTickInterval = temporal.sleep(timeTickInterval)
 
-    val getRealTimeIfAppropriate = trueTimeUpdateCounter.get.map { c =>
-      if c == UpdateNowWithTrueTimeAfterNUpdates then (Some(temporal.realTimeInstant), 0) else (None, c + 1)
-    }
+    val getRealTimeIfAppropriate: F[(Option[F[Instant]], Int)] =
+      trueTimeUpdateCounter.get.map { c =>
+        if c == UpdateNowWithTrueTimeAfterNUpdates then (Some(temporal.realTimeInstant), 0) else (None, c + 1)
+      }
 
-    val logError =
-      val errMsg = s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run."
-      U.loge(_, TimeTickWorkerName, errMsg)
+    val errMsg = s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run."
+    val logError = loge(_, errMsg)
 
     (for {
       - <- logGoingToSleep
@@ -274,7 +281,7 @@ object MemCache:
       _ <- r.update { case CacheState(m, s, lruMap, seqCounter, now) =>
         CacheState(m, s, lruMap, seqCounter, newNowOpt.getOrElse(now.plus(temporalAmount)))
       }
-      _ <- (newCounterVal == 0).whenA(logResettingClock)
+      _ <- (newCounterVal == 0).whenA(logResettingClock) // The counter was reset so log it.
       _ <- logTickUpdated
     } yield ())
       .handleErrorWith(logError)
