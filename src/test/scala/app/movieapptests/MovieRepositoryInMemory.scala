@@ -6,6 +6,7 @@ import cats.syntax.all.*
 
 import java.time.LocalDate
 
+import app.permissions.Permissions.Permission
 import app.services.MovieRepositoryService
 import app.services.MovieRepositoryUtils.DBError
 import app.JobSpecs.CreateSystemUserError
@@ -20,7 +21,7 @@ final class MovieRepositoryInMemory[F[_]: Async as async](
   override def getDirectorsDetails(
       firstName: Option[String],
       lastName: Option[String],
-  ): F[Seq[MovieDbModel.Director]] =
+  ): F[Vector[MovieDbModel.Director]] =
     directorsRef.get.map(
       _.values
         .filter { director =>
@@ -55,13 +56,16 @@ final class MovieRepositoryInMemory[F[_]: Async as async](
       (m.updated(movieId, MovieDbModel.Movie(movieId, title, year)), movieId)
     }
 
-  override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Int]] =
+  override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Long]] =
     ???
 
   override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsInDb]] =
     ???
 
-  override def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsInDb]] =
+  override def fetchSystemUserByUserId(userId: Long): F[Option[MovieDbModel.UserDetailsInDb]] =
+    ???
+
+  override def fetchSystemUserPermissions(userId: Long): F[Vector[Permission]] =
     ???
 
 object MovieRepositoryInMemory:

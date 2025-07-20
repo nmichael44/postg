@@ -12,17 +12,24 @@ import app.services.FileSystemService
 private final class FileSystemServiceLive[F[_]: Async as async] private extends FileSystemService[F]:
   def readFileContent(fileName: String): F[String] =
     readFileContentAux(fileName).use(async.pure)
+  end readFileContent
 
   def readTwoFilesInParallel(fileName1: String, fileName2: String): F[String] =
     (
       readFileContentAux(fileName1).use(async.pure),
       readFileContentAux(fileName2).use(async.pure),
     ).parMapN((c1, c2) => c1 + c2)
+  end readTwoFilesInParallel
 
   private def readFileContentAux(path: String): Resource[F, String] =
     Resource
       .fromAutoCloseable(async.blocking(Source.fromFile(path)))
       .evalMap(source => async.blocking(source.mkString))
+  end readFileContentAux
+end FileSystemServiceLive
 
 object FileSystemServiceLive:
-  def create[F[_]: Async]: FileSystemService[F] = FileSystemServiceLive[F]
+  def create[F[_]: Async]: FileSystemService[F] =
+    FileSystemServiceLive[F]
+  end create
+end FileSystemServiceLive

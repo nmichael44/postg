@@ -21,9 +21,12 @@ import org.typelevel.log4cats.Logger
 final class EmailServiceAsyncLive[F[_]: Async] private (queue: Queue[F, Mail[F]]) extends EmailService[F]:
   override def sendEmail(email: Mail[F]): F[Unit] =
     queue.offer(email)
+  end sendEmail
 
   override def sendEmail(emails: NonEmptyList[emil.Mail[F]]): F[Unit] =
     emails.toList.traverseVoid(sendEmail)
+  end sendEmail
+end EmailServiceAsyncLive
 
 object EmailServiceAsyncLive:
   def create[F[_]: { Async, Logger }](gmailConfig: GMailConfig): F[EmailService[F]] =
@@ -43,6 +46,7 @@ object EmailServiceAsyncLive:
           ) <* logi("Email service ready!")
       }
     }
+  end create
 
   private val WorkerSleepDuration: scala.concurrent.duration.Duration = 32.seconds
   private val WorkerBatchSize: Option[Int] = Some(3)
@@ -51,6 +55,7 @@ object EmailServiceAsyncLive:
 
   private def sendEmails[F[_]: Functor](emails: NonEmptyList[Mail[F]], mailer: Emil.Run[F, ?]): F[Unit] =
     mailer.send_(emails).void
+  end sendEmails
 
   private def sendUntilEmpty[F[_]: { Monad, Logger }](queue: Queue[F, Mail[F]], mailer: Emil.Run[F, ?]): F[Unit] =
     def loop(): F[Unit] =
@@ -64,6 +69,7 @@ object EmailServiceAsyncLive:
       }
 
     loop()
+  end sendUntilEmpty
 
   private def createWorker[F[_]: { Async as async, Logger }](
       queue: Queue[F, Mail[F]],
@@ -85,9 +91,13 @@ object EmailServiceAsyncLive:
     val processWithErrorHandling: F[Unit] = processUntilEmpty.handleErrorWith(onError)
 
     processWithErrorHandling.foreverM.start
+  end createWorker
 
   private def logi[F[_]: Logger](s: String): F[Unit] =
     U.logi(EmailWorkerName, s)
+  end logi
 
   private def loge[F[_]: Logger](e: Throwable, s: String): F[Unit] =
     U.loge(e, EmailWorkerName, s)
+  end loge
+end EmailServiceAsyncLive

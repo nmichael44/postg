@@ -7,15 +7,14 @@ import com.password4j.{Argon2Function, Password}
 import com.password4j.types.Argon2
 
 private final class PasswordHasherLive[F[_]: Sync as sync] private extends PasswordHasher[F]:
-  private val argon2Function: Argon2Function =
-    createArgonFunction(
-      memory = 65536, // In KB (64MB)
-      iterations = 3,
-      parallelism = 1,
-      outputLength = 32,
-      argon2Type = Argon2.ID,
-      version = 19,
-    )
+  private val argon2Function: Argon2Function = createArgonFunction(
+    memory = 65536, // In KB (64MB)
+    iterations = 3,
+    parallelism = 1,
+    outputLength = 32,
+    argon2Type = Argon2.ID,
+    version = 19,
+  )
 
   inline private final val LengthOfSaltValue = 16
 
@@ -27,15 +26,19 @@ private final class PasswordHasherLive[F[_]: Sync as sync] private extends Passw
         .`with`(argon2Function)
         .getResult
     }
+  end hashPassword
 
   override def checkPassword(password: String, hashedPassword: String): F[Boolean] =
     sync.blocking {
       Password.check(password, hashedPassword).`with`(argon2Function)
     }
+  end checkPassword
+end PasswordHasherLive
 
 object PasswordHasherLive:
   def create[F[_]: Sync]: PasswordHasher[F] =
     PasswordHasherLive[F]
+  end create
 
   private def createArgonFunction(
       memory: Int,
@@ -44,4 +47,7 @@ object PasswordHasherLive:
       outputLength: Int,
       argon2Type: Argon2,
       version: Int,
-  ) = Argon2Function.getInstance(memory, iterations, parallelism, outputLength, argon2Type, version)
+  ) =
+    Argon2Function.getInstance(memory, iterations, parallelism, outputLength, argon2Type, version)
+  end createArgonFunction
+end PasswordHasherLive

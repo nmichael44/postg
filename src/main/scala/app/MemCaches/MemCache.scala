@@ -1,4 +1,4 @@
-package app
+package app.MemCaches
 
 import cats.{FlatMap, Functor}
 import cats.effect.kernel.{Fiber, Ref, Resource}
@@ -12,9 +12,9 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.util.control.NoStackTrace
 
+import app.{TimeUtils, Utils as U}
 import app.ImplicitConversions.whenA
-import app.MemCache.{hasExpired, CacheElem, CacheState}
-import app.Utils as U
+import app.MemCaches.MemCache.{hasExpired, CacheElem, CacheState}
 import org.typelevel.log4cats.Logger
 
 final class MemCache[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V] private (
@@ -200,7 +200,7 @@ object MemCache:
   private def cleanupWorker[F[_]: { Temporal as temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
-      cleanupInterval: FiniteDuration,
+      cleanupDuration: FiniteDuration,
   ): F[Nothing] =
     val logi = U.logi(CleanupWorkerName, _)
     val loge = U.loge(_, CleanupWorkerName, _)
@@ -209,7 +209,7 @@ object MemCache:
     val logAwakeGoingToWork = logi(s"'$memCacheName': is awake and going to work...")
     val reportSizeBefore = reportSize(memCacheName, r, "before")
     val reportSizeAfter = reportSize(memCacheName, r, "after")
-    val sleepForCleanupInterval = temporal.sleep(cleanupInterval)
+    val sleepForCleanupInterval = temporal.sleep(cleanupDuration)
 
     val errMsg = s"'$memCacheName': encountered an error during a cycle.  Worker will continue to run."
     val logError = loge(_, errMsg)
@@ -219,17 +219,19 @@ object MemCache:
       _ <- sleepForCleanupInterval
       _ <- logAwakeGoingToWork
       _ <- reportSizeBefore
-      _ <- r.update { case CacheState(m0, s0, lruMap0, seqCounter0, now) =>
+      _ <- r.update { case currentState @ CacheState(m0, s0, lruMap0, seqCounter0, now) =>
         val expiredEntries = s0.view.takeWhile((expiry, _) => hasExpired(expiry, now)).toVector
-        val expiredKeys = expiredEntries.view.map(_._2).toVector
-        val expiredSeqs = expiredKeys.view.map(m0(_)._3)
+        if expiredEntries.isEmpty then currentState
+        else
+          val expiredKeys = expiredEntries.view.map(_._2).toVector
+          val expiredSeqs = expiredKeys.view.map(m0(_)._3)
 
-        val m1 = m0 -- expiredKeys
-        val s1 = s0 -- expiredEntries
-        val lruMap1 = lruMap0 -- expiredSeqs
-        val seqCounter1 = seqCounter0
+          val m1 = m0 -- expiredKeys
+          val s1 = s0 -- expiredEntries
+          val lruMap1 = lruMap0 -- expiredSeqs
+          val seqCounter1 = seqCounter0
 
-        CacheState(m1, s1, lruMap1, seqCounter1, now)
+          CacheState(m1, s1, lruMap1, seqCounter1, now)
       }
       _ <- reportSizeAfter
     } yield ())
@@ -239,10 +241,10 @@ object MemCache:
   private def startCleanupWorker[F[_]: { Temporal, Logger as logger }, K: Ordering, V](
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
-      cleanupInterval: FiniteDuration,
+      cleanupDuration: FiniteDuration,
   ): F[Fiber[F, Throwable, Nothing]] = for {
     _ <- logger.info(s"Starting memCache cleanup worker for '$memCacheName'...")
-    cleanupFiber <- cleanupWorker(memCacheName, r, cleanupInterval).start
+    cleanupFiber <- cleanupWorker(memCacheName, r, cleanupDuration).start
     _ <- logger.info(s"Cleanup worker started for '$memCacheName'. Fiber is '$cleanupFiber'.")
   } yield cleanupFiber
 
@@ -250,18 +252,18 @@ object MemCache:
       memCacheName: String,
       r: Ref[F, CacheState[K, V]],
       trueTimeUpdateCounter: Ref[F, Int],
-      timeTickInterval: FiniteDuration,
+      timeTickDuration: FiniteDuration,
   ): F[Nothing] =
     val logi = U.logi(TimeTickWorkerName, _)
     val loge = U.loge(_, TimeTickWorkerName, _)
 
-    val temporalAmount = timeTickInterval.toJava
+    val temporalAmount = timeTickDuration.toJava
 
     val logGoingToSleep = logi(s"'$memCacheName': Going to sleep until it's time to work...")
     val logGoingToWork = logi(s"'$memCacheName': is awake and going to work...")
     val logResettingClock = logi("Resetting internal memCache clock!")
     val logTickUpdated = logi(s"TimeTick for '$memCacheName', updated!")
-    val sleepForTickInterval = temporal.sleep(timeTickInterval)
+    val sleepForTickInterval = temporal.sleep(timeTickDuration)
 
     val getRealTimeIfAppropriate: F[(Option[F[Instant]], Int)] =
       trueTimeUpdateCounter.get.map { c =>

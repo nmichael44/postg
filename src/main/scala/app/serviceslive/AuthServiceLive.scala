@@ -5,6 +5,7 @@ import cats.syntax.all.*
 
 import java.time.{Clock, Instant}
 
+import app.permissions.Permissions.Permission
 import app.services.AuthService
 import app.AppConfig.AuthConfig
 import app.ImplicitConversions.*
@@ -23,7 +24,7 @@ private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: Aut
 
   private val JwtDecodingAlgorithmList: Seq[JwtHmacAlgorithm] = Seq(JwtEncodingAlgorithm)
 
-  override def createToken(user: UserDetailsInDb, permissions: Seq[String]): F[String] =
+  override def createToken(user: UserDetailsInDb, permissions: Seq[Permission]): F[String] =
     sync.blocking {
       val userId = user.userId
       val nowEpochSec = Instant.now(clock).getEpochSecond
@@ -48,12 +49,11 @@ private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: Aut
       JwtCirce.encode(claim, authConfig.getSecretKey, JwtEncodingAlgorithm)
     }
 
-  override def validateToken(token: String): F[Either[Throwable, AuthenticatedUser]] =
-    sync.blocking {
-      JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither >>= { jwtClaim =>
-        decode[AuthenticatedUser](jwtClaim.content)
-      }
+  override def validateToken(token: String): F[Either[Throwable, AuthenticatedUser]] = sync.blocking {
+    JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither >>= { jwtClaim =>
+      decode[AuthenticatedUser](jwtClaim.content)
     }
+  }
 
 object AuthServiceLive:
   def create[F[_]: Sync](authConfig: AuthConfig, clock: Clock): AuthService[F] =

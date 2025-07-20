@@ -28,3 +28,4 @@ trait ServerStateUpdateService[F[_]]:
    *   An F containing a Map from movie ID to count.
    */
   def getAllCounts: F[Map[Long, Int]]
+end ServerStateUpdateService

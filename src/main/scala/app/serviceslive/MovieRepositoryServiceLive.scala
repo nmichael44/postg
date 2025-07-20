@@ -4,28 +4,31 @@ import cats.data.NonEmptyVector
 import cats.effect.Async
 import cats.implicits.*
 
+import app.permissions.Permissions
+import app.permissions.Permissions.Permission
 import app.services.MovieRepositoryService
 import app.services.MovieRepositoryUtils.DBError
 import app.MovieDbModel
 import app.MovieDbModel.UserDetailsInDb
 import doobie.implicits.*
 import doobie.postgres.implicits.*
+import doobie.util.{Get, Read}
 import doobie.util.transactor.Transactor
 import org.postgresql.util.PSQLException
+import MovieRepositoryServiceLive.given
 
 private final class MovieRepositoryServiceLive[F[_]: Async as async] private (xa: Transactor[F])
     extends MovieRepositoryService[F]:
   override def getDirectorsDetails(
       firstName: Option[String],
       lastName: Option[String],
-  ): F[Seq[MovieDbModel.Director]] =
+  ): F[Vector[MovieDbModel.Director]] =
     sql"""select directorId, firstName, lastName, dob from t
           where
            ($firstName is null or firstName = $firstName)
            and ($lastName is null or lastName = $lastName)"""
       .query[MovieDbModel.Director]
       .to[Vector]
-      .map(identity)
       .transact(xa)
 
   override def getDirectorDetails(
@@ -98,9 +101,9 @@ private final class MovieRepositoryServiceLive[F[_]: Async as async] private (xa
 
   private val PostgresDuplicateValueSqlState: String = "23505"
 
-  override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Int]] =
+  override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Long]] =
     sql"""insert into systemUsers (loginName, hashedPassword) values($loginName, $hashedPassword)""".update
-      .withUniqueGeneratedKeys[Int]("userid")
+      .withUniqueGeneratedKeys[Long]("userid")
       .attempt
       .flatMap {
         case Right(userId) => Right(userId).pure
@@ -116,12 +119,20 @@ private final class MovieRepositoryServiceLive[F[_]: Async as async] private (xa
       .option
       .transact(xa)
 
-  override def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsInDb]] =
+  override def fetchSystemUserByUserId(userId: Long): F[Option[MovieDbModel.UserDetailsInDb]] =
     sql"""select userId, loginName, hashedPassword from systemUsers where userId = $userId"""
       .query[MovieDbModel.UserDetailsInDb]
       .option
       .transact(xa)
 
+  override def fetchSystemUserPermissions(userId: Long): F[Vector[Permission]] =
+    sql"""select p.description from userPermissions up, permissions p where up.userid = $userId and up.permissionId = p.permissionId"""
+      .query[Permission]
+      .to[Vector]
+      .transact(xa)
+
 object MovieRepositoryServiceLive:
   def create[F[_]: Async](xa: Transactor[F]): MovieRepositoryService[F] =
     MovieRepositoryServiceLive[F](xa)
+
+  given Get[Permission] = summon[Get[String]].map(Permissions.fromString)

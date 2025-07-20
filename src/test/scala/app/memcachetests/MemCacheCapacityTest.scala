@@ -9,7 +9,7 @@ import scala.concurrent.duration.*
 import org.scalatest.freespec.AsyncFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-import app.MemCache
+import app.MemCaches.MemCache
 import app.TestUtils.*
 
 final class MemCacheCapacityTest extends AsyncFreeSpec with AsyncIOSpec with Matchers:

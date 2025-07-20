@@ -21,9 +21,12 @@ import retry.{retryingOnErrors, ErrorHandler, HandlerDecision, RetryPolicies, Re
 final class EmailServiceAsync2Live[F[_]: Async] private (queue: Queue[F, Mail[F]]) extends EmailService[F]:
   override def sendEmail(email: Mail[F]): F[Unit] =
     queue.offer(email)
+  end sendEmail
 
   override def sendEmail(emails: NonEmptyList[emil.Mail[F]]): F[Unit] =
     emails.toList.traverseVoid(sendEmail)
+  end sendEmail
+end EmailServiceAsync2Live
 
 object EmailServiceAsync2Live:
   def create[F[_]: { Async as async, Logger }](gmailConfig: GMailConfig): Resource[F, EmailService[F]] =
@@ -35,6 +38,7 @@ object EmailServiceAsync2Live:
       queue <- Resource.eval(Queue.bounded[F, Mail[F]](EmailQueueSize))
       _ <- Resource.make(startWorker(queue, emil, mailConf))(stopWorker)
     } yield new EmailServiceAsync2Live[F](queue)
+  end create
 
   private def startWorker[F[_]: { Async as async, Logger }](
       queue: Queue[F, Mail[F]],
@@ -50,9 +54,11 @@ object EmailServiceAsync2Live:
 
     val emailWorker = EmailWorker(queue, emil, mailConf)
     retryingOnErrors(emailWorker.go)(retryPolicy, errorHandler).start
+  end startWorker
 
   private def stopWorker[F[_]: { Async, Logger }](fiber: Fiber[F, Throwable, Unit]) =
     U.logi("MainFiber", "Shutting down email worker.") *> fiber.cancel
+  end stopWorker
 
   private final val EmailQueueSize: Int = 128
 
@@ -63,6 +69,7 @@ object EmailServiceAsync2Live:
   ):
     private def sendEmail(email: Mail[F], sender: Send[F, JavaMailConnection], connection: JavaMailConnection): F[Unit] =
       sender.sendMails(NonEmptyList.one(email)).run(connection).void
+    end sendEmail
 
     private val logEmailFound = logi("Email found. Attempting to send.")
     private val logEmailSend = logi("Email sent successfully!")
@@ -71,6 +78,7 @@ object EmailServiceAsync2Live:
     private def onError(email: Mail[F]) = (e: Throwable) =>
       loge(e, "Exception thrown while sending email. Returning email to queue and reestablishing connection.") *>
         queue.offer(email) *> async.raiseError[Unit](e)
+    end onError
 
     val go: F[Unit] =
       logWorkerCreatingNewConnection *>
@@ -89,6 +97,10 @@ object EmailServiceAsync2Live:
 
     private def logi(s: String): F[Unit] =
       U.logi(EmailWorkerName, s)
+    end logi
 
     private def loge(e: Throwable, s: String): F[Unit] =
       U.loge(e, EmailWorkerName, s)
+    end loge
+  end EmailWorker
+end EmailServiceAsync2Live

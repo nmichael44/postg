@@ -26,13 +26,3 @@ object JitTest:
     val y3 = x3 * 7
 
     y0 + y1 + y2 + y3
-
-  def gg(x0: Int, x1: Int): Int =
-    val p = (x0, x1)
-
-    p._1 * p._1 + p._2 * p._2
-
-  def hh(x0: Int, x1: Int): Int =
-    val p = (java.lang.Integer(x0), java.lang.Integer(x1))
-
-    p._1 * p._1 + p._2 * p._2

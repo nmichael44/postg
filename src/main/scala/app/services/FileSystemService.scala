@@ -22,3 +22,4 @@ trait FileSystemService[F[_]]:
    *   An F containing the concatenated content of the two files, or an error if either file cannot be read.
    */
   def readTwoFilesInParallel(fileName1: String, fileName2: String): F[String]
+end FileSystemService

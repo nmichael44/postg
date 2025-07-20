@@ -13,14 +13,17 @@ private final class ExternalApiClientServiceLive[F[_]: Async as async] private (
   override def fetchUri(uri: Uri): F[String] =
     val request: Request[F] = Request[F](Method.GET, uri)
     doRequest(client, request)
+  end fetchUri
 
   override def fetchCompanyData(companyName: String): F[String] =
     val uri: Uri = Uri.unsafeFromString(s"https://www.$companyName.com")
     val request = Request[F](Method.GET, uri)
     doRequest(client, request)
+  end fetchCompanyData
 
   def fetchAsJson[A: Decoder](uri: org.http4s.Uri): F[A] =
     client.expect[A](uri)(using jsonOf[F, A])
+  end fetchAsJson
 
   private def doRequest(client: Client[F], request: Request[F]): F[String] =
     client.run(request).use { response =>
@@ -31,7 +34,11 @@ private final class ExternalApiClientServiceLive[F[_]: Async as async] private (
           RuntimeException(s"External service call failed with status: ${response.status}."),
         )
     }
+  end doRequest
+end ExternalApiClientServiceLive
 
 object ExternalApiClientServiceLive:
   def create[F[_]: Async](client: Client[F]): ExternalApiClientService[F] =
     ExternalApiClientServiceLive[F](client)
+  end create
+end ExternalApiClientServiceLive

@@ -30,7 +30,7 @@ object ImplicitConversions:
   }
 
   extension [F[_]: Functor, A](fa: F[A]) {
-    inline def lift[B]: EitherT[F, B, A] = EitherT.liftF[F, B, A](fa)
+    inline def lifte[B]: EitherT[F, B, A] = EitherT.liftF[F, B, A](fa)
   }
 
   extension [F[_], A, B](fe: F[Either[A, B]]) {

@@ -20,17 +20,21 @@ object JobSpecs:
     case FetchSystemUserByUserId(userIdStr: String) extends JobKind("FetchSystemUserByUserId")
     case LoginRequest(userDetails: UserDetails) extends JobKind("LoginRequest")
     case SendEmail(msg: EmailMessage) extends JobKind("EmailMessage")
+  end JobKind
 
   enum FetchSystemUserError derives CanEqual:
     case NotFound
     case BadInput
+  end FetchSystemUserError
 
   enum LoginRequestError:
     case InvalidLoginPassword
+  end LoginRequestError
 
   enum CreateSystemUserError:
     case DuplicateLoginNameInDB(loginName: String)
     case BadPassword(errorList: NonEmptyVector[String])
+  end CreateSystemUserError
 
   enum JobResult:
     case DirectorsDetailsByNameResult(directors: Seq[MovieDbModel.Director])
@@ -40,8 +44,9 @@ object JobSpecs:
     case MovieDetailsResult(movie: Option[MovieDbModel.Movie])
     case MovieWithCountingResult(movie: Option[MovieDbModel.Movie])
     case CreateMovieResult(movieId: Long)
-    case CreateSystemUserResult(res: Either[CreateSystemUserError, Int])
+    case CreateSystemUserResult(res: Either[CreateSystemUserError, Long])
     case FetchSystemUserByLoginNameResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
     case FetchSystemUserByUserIdResult(res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb])
     case LoginRequestResult(res: Either[LoginRequestError, String])
     case SendEmailResult(res: Either[NonEmptyVector[String], String])
+  end JobResult

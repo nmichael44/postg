@@ -2,7 +2,7 @@ package app
 
 import java.time.LocalDate
 
-import io.circe.generic.auto.*
+import app.permissions.Permissions.Permission
 
 object MovieDbModel:
   final case class DirectorPath(firstName: Option[String], lastName: Option[String]):
@@ -35,9 +35,9 @@ object MovieDbModel:
 
   final case class UserDetails(loginName: String, password: String)
 
-  final case class UserDetailsInDb(userId: Int, loginName: String, hashedPassword: String)
+  final case class UserDetailsInDb(userId: Long, loginName: String, hashedPassword: String)
 
-  final case class AuthenticatedUser(userId: Long, permissions: Set[String], issuedAt: Long, expiresAt: Long)
+  final case class AuthenticatedUser(userId: Long, permissions: Set[Permission], issuedAt: Long, expiresAt: Long)
 
   final case class EmailMessage(
       from: String,
@@ -47,3 +47,4 @@ object MovieDbModel:
       subject: String,
       body: String,
   )
+end MovieDbModel

@@ -5,6 +5,7 @@ import cats.effect.MonadCancelThrow
 
 import scala.util.control.NoStackTrace
 
+import app.permissions.Permissions.Permission
 import app.services.MovieRepositoryService
 import app.services.MovieRepositoryUtils.DBError
 import app.MovieDbModel
@@ -14,7 +15,7 @@ object MovieAppTestUtils:
     new Exception("MovieRepositoryService not properly overridden in test") with NoStackTrace
 
   class MovieRepositoryServiceShunning[F[_]: MonadCancelThrow as mc] extends MovieRepositoryService[F]:
-    override def getDirectorsDetails(firstName: Option[String], lastName: Option[String]): F[Seq[MovieDbModel.Director]] =
+    override def getDirectorsDetails(firstName: Option[String], lastName: Option[String]): F[Vector[MovieDbModel.Director]] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
     override def getDirectorDetails(directorIds: NonEmptyVector[Long]): F[Map[Long, MovieDbModel.Director]] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
@@ -26,9 +27,11 @@ object MovieAppTestUtils:
       mc.raiseError(MovieRepositoryServiceNotImplemented)
     override def createMovie(title: String, year: Int): F[Long] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
-    override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Int]] =
+    override def createSystemUser(loginName: String, hashedPassword: String): F[Either[DBError, Long]] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
     override def fetchSystemUserByLoginName(loginName: String): F[Option[MovieDbModel.UserDetailsInDb]] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
-    override def fetchSystemUserByUserId(userId: Int): F[Option[MovieDbModel.UserDetailsInDb]] =
+    override def fetchSystemUserByUserId(userId: Long): F[Option[MovieDbModel.UserDetailsInDb]] =
+      mc.raiseError(MovieRepositoryServiceNotImplemented)
+    override def fetchSystemUserPermissions(userId: Long): F[Vector[Permission]] =
       mc.raiseError(MovieRepositoryServiceNotImplemented)
