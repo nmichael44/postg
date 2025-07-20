@@ -21,6 +21,7 @@ object AppConfig:
     def getPassword: String = password
     def getMaxConnections: Int = maxConnections
     def getMinIdleConnections: Int = minIdleConnections
+  end DbConnectionConfig
 
   final case class ServerConnectionConfig(
       private val host: String,
@@ -32,6 +33,7 @@ object AppConfig:
     def getPort: Int = port.port
     def getKeystoreFile: String = keystoreFile
     def getKeystorePassword: String = keystorePassword
+  end ServerConnectionConfig
 
   final case class BackendServerConfig(
       private val numberOfWorkers: Int,
@@ -39,6 +41,7 @@ object AppConfig:
   ) derives ConfigReader:
     def getNumberOfWorkers: Int = numberOfWorkers
     def getBoundedQueueCapacity: Int = boundedQueueCapacity
+  end BackendServerConfig
 
   final case class DirectorMemCacheConfig(
       private val capacity: Int,
@@ -50,6 +53,7 @@ object AppConfig:
     def getCleanupDurationInMillis: Int = cleanupDurationInMillis
     def getTimeTickDurationInMillis: Int = timeTickDurationInMillis
     def getCacheEnabled: Boolean = cacheEnabled
+  end DirectorMemCacheConfig
 
   final case class ActorMemCacheConfig(
       private val capacity: Int,
@@ -61,6 +65,7 @@ object AppConfig:
     def getCleanupDurationInMillis: Int = cleanupDurationInMillis
     def getTimeTickDurationInMillis: Int = timeTickDurationInMillis
     def getCacheEnabled: Boolean = cacheEnabled
+  end ActorMemCacheConfig
 
   final case class MovieMemCacheConfig(
       private val capacity: Int,
@@ -72,6 +77,7 @@ object AppConfig:
     def getCleanupDurationInMillis: Int = cleanupDurationInMillis
     def getTimeTickDurationInMillis: Int = timeTickDurationInMillis
     def getCacheEnabled: Boolean = cacheEnabled
+  end MovieMemCacheConfig
 
   final case class MemCacheConfig(
       private val directorMemCacheConfig: DirectorMemCacheConfig,
@@ -81,6 +87,7 @@ object AppConfig:
     def getDirectorMemCacheConfig: DirectorMemCacheConfig = directorMemCacheConfig
     def getActorMemCacheConfig: ActorMemCacheConfig = actorMemCacheConfig
     def getMovieMemCacheConfig: MovieMemCacheConfig = movieMemCacheConfig
+  end MemCacheConfig
 
   final case class AuthConfig(
       private val secretKey: String,
@@ -90,6 +97,7 @@ object AppConfig:
     def getSecretKey: String = secretKey
     def getExpirationPeriodInSecond: Long = expirationPeriodInSeconds
     def getJwtEncodingAlgorithm: String = jwtEncodingAlgorithm
+  end AuthConfig
 
   final case class GMailConfig(
       private val emailUser: String,
@@ -97,6 +105,7 @@ object AppConfig:
   ):
     def getEmailUser: String = emailUser
     def getEmailUserPassword: String = emailUserPassword
+  end GMailConfig
 
   final case class AppConfig(
       private val name: String,
@@ -113,6 +122,7 @@ object AppConfig:
     def getMemCacheConfig: MemCacheConfig = memCacheConfig
     def getAuthConfig: AuthConfig = authConfig
     def getGmailConfig: GMailConfig = gmailConfig
+  end AppConfig
 
   final case class Port(port: Int) extends AnyVal
 
@@ -134,3 +144,4 @@ object AppConfig:
           ).asLeft,
       )
   }
+end AppConfig

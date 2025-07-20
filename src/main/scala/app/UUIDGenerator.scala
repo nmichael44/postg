@@ -21,6 +21,7 @@ final class UUIDGenerator[F[_]: Async] private (queue: Queue[F, RandomnessSource
   }
 
   val generateUUIDAsString: F[String] = generateUUID.map(_.toString)
+end UUIDGenerator
 
 object UUIDGenerator:
   private final class RandomnessSource[F[_]: Async as async](rng: RandomGenerator):
@@ -30,6 +31,7 @@ object UUIDGenerator:
     (msb & 0xffffffffffff0fffL) | 0x0000000000040000L,
     (lsb & 0x3fffffffffffffffL) | 0x8000000000000000L,
   )
+  end makeV4UUID
 
   // How many random number generators are available for use.  If that there more than
   // LevelOfParallelism requests at the same time, the next fiber will wait until one
@@ -43,6 +45,7 @@ object UUIDGenerator:
       _ <- queue.offer(RandomnessSource[F](masterRng))
       _ <- async.replicateA_(LevelOfParallelism - 1, async.defer(queue.offer(RandomnessSource[F](masterRng.split()))))
     } yield ()
+  end populateQueue
 
   private def createImpl[F[_]: Async as async](seedOpt: Option[Long]): Resource[F, UUIDGenerator[F]] =
     Resource.eval {
@@ -50,9 +53,13 @@ object UUIDGenerator:
         populateQueue(queue, seedOpt) *> async.pure(UUIDGenerator[F](queue))
       )
     }
+  end createImpl
 
   def create[F[_]: Async]: Resource[F, UUIDGenerator[F]] =
     createImpl(None)
+  end create
 
   def create[F[_]: Async](seed: Long): Resource[F, UUIDGenerator[F]] =
     createImpl(Some(seed))
+  end create
+end UUIDGenerator
