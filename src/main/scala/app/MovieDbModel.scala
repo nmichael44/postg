@@ -8,9 +8,11 @@ object MovieDbModel:
   final case class DirectorPath(firstName: Option[String], lastName: Option[String]):
     override def toString: String =
       s"{ firstName = ${firstName.getOrElse("None")}, lastName = ${lastName.getOrElse("None")} }"
+  end DirectorPath
 
   final case class Actor(actorId: Long, firstName: String, lastName: String, dob: LocalDate):
     override def toString: String = s"Actor($firstName $lastName)"
+  end Actor
 
   final case class Director(
       directorId: Long,
@@ -19,6 +21,7 @@ object MovieDbModel:
       dob: LocalDate,
   ):
     override def toString: String = s"Director($firstName $lastName)"
+  end Director
 
   final case class Movie(
       movieId: Long,
@@ -26,12 +29,14 @@ object MovieDbModel:
       year: Int,
   ):
     override def toString: String = s"Movie($title)"
+  end Movie
 
   final case class DirectorWithMovies(
       director: MovieDbModel.Director,
       movies: Vector[MovieDbModel.Movie],
   ):
     override def toString: String = s"DirectorWithMovies($director, $movies)"
+  end DirectorWithMovies
 
   final case class UserDetails(loginName: String, password: String)
 
