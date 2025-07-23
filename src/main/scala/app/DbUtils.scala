@@ -87,7 +87,7 @@ object DbUtils:
       numRows: Int,
       minStrSize: Int,
       maxStrSize: Int,
-  ): Try[Unit] = {
+  ): Try[Unit] =
     val sql = s"insert into $tableName values(?)"
 
     Using(connection.prepareStatement(sql)) { st =>
@@ -95,82 +95,22 @@ object DbUtils:
         val randomString = generateRandomString(minStrSize, maxStrSize)
         st.setString(1, randomString)
         st.addBatch()
-        println("hi")
       }
       st.executeBatch()
-      println("there")
       connection.commit()
     }
-  }
+  end populateTextColumn
 
   private val rnd: Random = Random
 
-  private def generateRandomString(minLength: Int, maxLength: Int): String = {
+  private def generateRandomString(minLength: Int, maxLength: Int): String =
     val length = rnd.nextInt(maxLength - minLength + 1) + minLength
     rnd.shuffle('a' to 'z').view.take(length).mkString
-  }
+  end generateRandomString
 
   private type Bucket = (String, String, Long)
 
   private def formCalcQuery(tableName: String, colName: String): String =
     s"select $colName, count(*) from $tableName group by $colName order by 1"
-
-  def calcStatistics(
-      connection: Connection,
-      tableName: String,
-      colName: String,
-      preStats: PreStats,
-      defaultNumBuckets: Long,
-  ): Try[Seq[Bucket]] = {
-    val countDistinct = preStats.countDistinct
-    val sql = formCalcQuery(tableName, colName)
-    val vb = Vector.newBuilder[Bucket]
-
-    println(sql)
-    if (countDistinct <= defaultNumBuckets)
-      Using(connection.createStatement()) { st =>
-        val rs = st.executeQuery(sql)
-
-        while (rs.next()) {
-          val str = rs.getString(1)
-          val bucketCnt = rs.getLong(2)
-          vb.addOne((str, str, bucketCnt))
-        }
-
-        vb.result()
-      }
-    else {
-      val nonNullValuesCount = preStats.totalCount - preStats.nullCount
-
-      val averageBucketSize = nonNullValuesCount / defaultNumBuckets
-
-      Using(connection.createStatement()) { st =>
-        val rs = st.executeQuery(sql)
-
-        var left: String = null
-        var right: String = null
-        var bucketCnt: Long = 0L
-
-        while (rs.next()) {
-          if (left == null)
-            left = rs.getString(1)
-          right = rs.getString(1)
-
-          val currentCnt = rs.getLong(2)
-          val newBucketCnt = bucketCnt + currentCnt
-
-          if (newBucketCnt >= averageBucketSize) {
-            vb.addOne((left, right, newBucketCnt))
-
-            left = null
-            bucketCnt = 0L
-          } else
-            bucketCnt = newBucketCnt
-        }
-        if (left != null) // There is an unfinished bucket.
-          vb.addOne((left, right, bucketCnt))
-
-        vb.result()
-      }
-    }
-  }
+  end formCalcQuery
+end DbUtils

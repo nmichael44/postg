@@ -31,3 +31,4 @@ trait MovieRepositoryService[F[_]]:
   def fetchSystemUserByUserId(userId: Long): F[Option[MovieDbModel.UserDetailsInDb]]
 
   def fetchSystemUserPermissions(userId: Long): F[Vector[Permission]]
+end MovieRepositoryService

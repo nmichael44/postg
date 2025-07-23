@@ -48,12 +48,15 @@ private final class AuthServiceLive[F[_]: Sync as sync] private (authConfig: Aut
 
       JwtCirce.encode(claim, authConfig.getSecretKey, JwtEncodingAlgorithm)
     }
+  end createToken
 
   override def validateToken(token: String): F[Either[Throwable, AuthenticatedUser]] = sync.blocking {
     JwtCirce.decode(token, authConfig.getSecretKey, JwtDecodingAlgorithmList).toEither >>= { jwtClaim =>
       decode[AuthenticatedUser](jwtClaim.content)
     }
   }
+  end validateToken
+end AuthServiceLive
 
 object AuthServiceLive:
   def create[F[_]: Sync](authConfig: AuthConfig, clock: Clock): AuthService[F] =
@@ -64,3 +67,4 @@ object AuthServiceLive:
       .fromString(authConfig.getJwtEncodingAlgorithm)
       .safeAs[JwtHmacAlgorithm]
       .getOrElse(throw AssertionError("We only support Hmac algorithms for token encryption."))
+end AuthServiceLive

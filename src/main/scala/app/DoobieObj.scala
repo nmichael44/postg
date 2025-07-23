@@ -43,12 +43,14 @@ object DoobieObj:
     hikariConfig.setMinimumIdle(minIdleConnections)
 
     HikariTransactor.fromHikariConfig[F](hikariConfig)
+  end createTransactorResource
 
   def xaResource[F[_]: Async](dbConfig: DbConnectionConfig): Resource[F, HikariTransactor[F]] =
     createTransactorResource[F](dbConfig)
+  end xaResource
 
   // Transaction example.
-  def f15(xa: Transactor[IO]): IO[Int] = {
+  def f15(xa: Transactor[IO]): IO[Int] =
     val n: Int = 1
     val transaction: Free[connection.ConnectionOp, Int] = for {
       neo1_v <- sql"select m from neo1 where n = $n".query[Int].unique
@@ -57,4 +59,5 @@ object DoobieObj:
     } yield ins
 
     transaction.transact(xa)
-  }
+  end f15
+end DoobieObj

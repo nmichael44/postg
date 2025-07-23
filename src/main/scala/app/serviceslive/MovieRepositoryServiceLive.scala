@@ -130,9 +130,11 @@ private final class MovieRepositoryServiceLive[F[_]: Async as async] private (xa
       .query[Permission]
       .to[Vector]
       .transact(xa)
+end MovieRepositoryServiceLive
 
 object MovieRepositoryServiceLive:
   def create[F[_]: Async](xa: Transactor[F]): MovieRepositoryService[F] =
     MovieRepositoryServiceLive[F](xa)
 
   given Get[Permission] = summon[Get[String]].map(Permissions.fromString)
+end MovieRepositoryServiceLive

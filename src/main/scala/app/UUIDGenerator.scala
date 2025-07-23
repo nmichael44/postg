@@ -7,18 +7,13 @@ import cats.implicits.*
 import java.util.{SplittableRandom, UUID}
 import java.util.random.RandomGenerator
 
-import app.UUIDGenerator.{makeV4UUID, RandomnessSource}
+import app.UUIDGenerator.RandomnessSource
 
 final class UUIDGenerator[F[_]: Async] private (queue: Queue[F, RandomnessSource[F]]):
   private val withItemFromQueue: Resource[F, RandomnessSource[F]] =
     Resource.make(queue.take)(queue.offer)
 
-  private val generateUUID: F[UUID] = withItemFromQueue.use { rndSrc =>
-    for {
-      msb <- rndSrc.nextLong()
-      lsb <- rndSrc.nextLong()
-    } yield makeV4UUID(msb, lsb)
-  }
+  private val generateUUID: F[UUID] = withItemFromQueue.use(UUIDGenerator.makeUUID)
 
   val generateUUIDAsString: F[String] = generateUUID.map(_.toString)
 end UUIDGenerator
@@ -26,6 +21,12 @@ end UUIDGenerator
 object UUIDGenerator:
   private final class RandomnessSource[F[_]: Async as async](rng: RandomGenerator):
     def nextLong(): F[Long] = async.delay(rng.nextLong())
+
+  private def makeUUID[F[_]: Async](rndSrc: RandomnessSource[F]): F[UUID] =
+    for {
+      msb <- rndSrc.nextLong()
+      lsb <- rndSrc.nextLong()
+    } yield makeV4UUID(msb, lsb)
 
   private def makeV4UUID(msb: Long, lsb: Long): UUID = UUID(
     (msb & 0xffffffffffff0fffL) | 0x0000000000040000L,

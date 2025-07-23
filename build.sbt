@@ -20,7 +20,7 @@ val catsRetryVersion = "4.0.0"
 lazy val root = (project in file("."))
   .settings(
     name := "postg",
-    scalacOptions ++= Seq("-deprecation", "-Xmax-inlines:64", "-language:strictEquality"),
+    scalacOptions ++= Seq("-deprecation", "-Xmax-inlines:64", "-language:strictEquality", "-Yexplicit-nulls"),
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % catsEffectVersion,
       "com.github.cb372" %% "cats-retry" % catsRetryVersion,

@@ -12,9 +12,11 @@ object DeferredProducerConsumer:
 
   private def createProducer[F[_]: Async](d: Deferred[F, JobToDo], job: JobToDo): F[Unit] =
     d.complete(job).void
+  end createProducer
 
   private def createConsumer[F[_]](d: Deferred[F, JobToDo]): F[JobToDo] =
     d.get
+  end createConsumer
 
   def run[F[_]: { Async as async, Logger as logger }]: F[ExitCode] =
     val jobToSend = JobToDo(11)
@@ -40,3 +42,5 @@ object DeferredProducerConsumer:
       _ <- logger.info(job.hashCode().toString)
       _ <- logger.info((job eq jobToSend).toString)
     } yield ExitCode.Success
+  end run
+end DeferredProducerConsumer
