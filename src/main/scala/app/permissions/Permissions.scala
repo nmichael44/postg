@@ -23,7 +23,7 @@ object Permissions:
   end Permission
 
   private val permissionMap: Map[String, Permission] =
-    Permission.values.map(p => p.toString -> p).toMap
+    Permission.values.view.map(p => p.toString -> p).toMap
 
   def fromString(s: String): Permission =
     permissionMap.getOrElse(s, throw AssertionError(s"Bad permission '$s'."))
