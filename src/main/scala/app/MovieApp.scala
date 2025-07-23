@@ -48,7 +48,7 @@ import services.{AuthService, EmailService, ExternalApiClientService, FileSystem
 import MovieApp.{AppDependencies, Render, WebServiceResult}
 import MovieDbModel.AuthenticatedUser
 
-final class MovieApp[F[_]: { Async as async, Logger as logger }](
+private final class MovieApp[F[_]: { Async as async, Logger as logger }] private (
     deps: AppDependencies[F],
     dsl: Http4sDsl[F],
     render: Render[F],
@@ -263,7 +263,8 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
         NonEmptyVector.of(
           PermissionAlgebra.Has(Permission.CanReadAnything),
           PermissionAlgebra.And(
-            NonEmptyVector.of(PermissionAlgebra.Has(Permission.CanReadDirectors), PermissionAlgebra.Has(Permission.CanReadMovies)),
+            NonEmptyVector
+              .of(PermissionAlgebra.Has(Permission.CanReadDirectors), PermissionAlgebra.Has(Permission.CanReadMovies)),
           ),
         ),
       )
@@ -361,16 +362,20 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
   private given EntityDecoder[F, MovieDbModel.UserDetails] =
     jsonOf[F, MovieDbModel.UserDetails]
 
+  private val CreateSystemUserPermissionsAlg: CompiledPermissionAlgebra =
+    PermissionAlgebra.Has(Permission.CanCreateSystemUser).compile
+
   private def createSystemUser(
       serverState: ServerState[F],
-      req: Request[F],
+      ctxReq: ContextRequest[F, AuthenticatedUser],
       uuidGen: UUIDGenerator[F],
   ): F[WebServiceResult] =
-    req.as[MovieDbModel.UserDetails].attempt >>= {
+    ctxReq.req.as[MovieDbModel.UserDetails].attempt >>= {
       case Left(_) => async.pure(WebServiceResult.BadRequestRes("Invalid request body"))
       case Right(userDetails) =>
         jobHandler[CreateSystemUserResult](
-          req,
+          ctxReq,
+          CreateSystemUserPermissionsAlg,
           serverState,
           uuidGen,
           CreateSystemUser(userDetails),
@@ -389,13 +394,8 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
     }
   end createSystemUser
 
-  private def createSystemUser(
-      serverState: ServerState[F],
-      ctxReq: ContextRequest[F, AuthenticatedUser],
-      uuidGen: UUIDGenerator[F],
-  ): F[WebServiceResult] =
-    createSystemUser(serverState, ctxReq.req, uuidGen)
-  end createSystemUser
+  private val FetchSystemUserPermissionsAlg: CompiledPermissionAlgebra =
+    PermissionAlgebra.Has(Permission.CanFetchSystemUser).compile
 
   def fetchSystemUserByLoginName(
       serverState: ServerState[F],
@@ -404,7 +404,8 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
       loginName: String,
   ): F[WebServiceResult] =
     jobHandler[FetchSystemUserByLoginNameResult](
-      ctxReq.req,
+      ctxReq,
+      FetchSystemUserPermissionsAlg,
       serverState,
       uuidGen,
       FetchSystemUserByLoginName(loginName),
@@ -424,7 +425,8 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
       userIdStr: String,
   ): F[WebServiceResult] =
     jobHandler[FetchSystemUserByUserIdResult](
-      ctxReq.req,
+      ctxReq,
+      FetchSystemUserPermissionsAlg,
       serverState,
       uuidGen,
       FetchSystemUserByUserId(userIdStr),
@@ -529,11 +531,7 @@ final class MovieApp[F[_]: { Async as async, Logger as logger }](
   private val publicRoutes: ReqToWsr[F] =
     val serverState = deps.serverState
     val uuidGen = deps.uuidGen
-    {
-      case req @ POST -> Root / "login" => processLoginRequest(serverState, req, uuidGen)
-      // This should be removed after we are done testing.
-      case req @ POST -> Root / "createSystemUser" => createSystemUser(serverState, req, uuidGen)
-    }
+    { case req @ POST -> Root / "login" => processLoginRequest(serverState, req, uuidGen) }
 
   private val authedRoutes: CtxReqToWsr[F] =
     val serverState = deps.serverState

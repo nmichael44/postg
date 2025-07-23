@@ -17,6 +17,9 @@ object Permissions:
     case CanWriteAnything
 
     case CanSendEmail
+
+    case CanCreateSystemUser
+    case CanFetchSystemUser
   end Permission
 
   private val permissionMap: Map[String, Permission] =
