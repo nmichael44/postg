@@ -280,13 +280,15 @@ object HttpWorker:
         .leftMap(_.toNonEmptyVector)
     end createEmailMsg
 
+    private val EmailSentF: F[Either[NonEmptyVector[String], String]] = async.pure(Right("Email Sent!"))
+
     private def processSendEmail(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.SendEmail]
       val msg = j.msg
 
       (createEmailMsg(msg).toEither match {
-        case Left(xs) => async.pure(Left(xs))
-        case Right(email) => emailService.sendEmail(email) *> async.pure(Right("Email Sent!"))
+        case Left(errors) => async.pure(Left(errors))
+        case Right(email) => emailService.sendEmail(email) *> EmailSentF
       }).map(JobResult.SendEmailResult.apply)
     end processSendEmail
 
@@ -317,7 +319,7 @@ object HttpWorker:
     end executeJob
   end JobExecutor
 
-  private def createWorker[F[_]: { Async as async, Logger }](queue: Queue[F, Job[F]], je: JobExecutor[F]): F[Nothing] =
+  private def createWorker[F[_]: { Async as async }](queue: Queue[F, Job[F]], je: JobExecutor[F]): F[Nothing] =
     val logWaitingForWork = je.logi("Waiting for work.")
     val logSendingResultsBack = je.logi("Done. Sending results back...")
     val getJobFromQueue = queue.take.map(j => (j.job, j.deferred, j.uuid))
