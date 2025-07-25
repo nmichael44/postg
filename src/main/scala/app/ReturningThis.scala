@@ -86,3 +86,4 @@ object ReturningThis:
 
   println(myPets)
   println(myRenamedPets)
+end ReturningThis

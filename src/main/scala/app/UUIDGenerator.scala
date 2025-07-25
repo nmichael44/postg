@@ -27,6 +27,7 @@ object UUIDGenerator:
       msb <- rndSrc.nextLong()
       lsb <- rndSrc.nextLong()
     } yield makeV4UUID(msb, lsb)
+  end makeUUID
 
   private def makeV4UUID(msb: Long, lsb: Long): UUID = UUID(
     (msb & 0xffffffffffff0fffL) | 0x0000000000040000L,

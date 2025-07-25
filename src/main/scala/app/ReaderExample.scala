@@ -35,3 +35,4 @@ object ReaderExample:
 
   def mainAux(n: Int, m: Int, config: Config): Int =
     h(n + m).run(config)
+end ReaderExample

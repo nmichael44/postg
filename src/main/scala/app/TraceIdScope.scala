@@ -16,3 +16,4 @@ object TraceIdScope:
           Resource.make(local.getAndSet(a))(previous => local.set(previous)).void
       }
     }
+end TraceIdScope

@@ -58,3 +58,4 @@ object VecSummer:
       res <- summer(v)
       _ <- logger.info(s"Sum was: $res")
     } yield ExitCode.Success
+end VecSummer

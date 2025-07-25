@@ -10,7 +10,7 @@ import app.AppConfig.GMailConfig
 import emil.*
 import emil.javamail.*
 
-final class EmailServiceLive[F[_]: Functor] private (mailer: Emil.Run[F, ?]) extends EmailService[F]:
+private final class EmailServiceLive[F[_]: Functor] private (mailer: Emil.Run[F, ?]) extends EmailService[F]:
   override def sendEmail(email: Mail[F]): F[Unit] =
     sendEmail(NonEmptyList.one(email))
   end sendEmail

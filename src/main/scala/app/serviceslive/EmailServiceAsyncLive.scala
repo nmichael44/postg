@@ -18,7 +18,7 @@ import emil.{Emil, Mail, MailConfig}
 import emil.javamail.JavaMailEmil
 import org.typelevel.log4cats.Logger
 
-final class EmailServiceAsyncLive[F[_]: Async] private (queue: Queue[F, Mail[F]]) extends EmailService[F]:
+private final class EmailServiceAsyncLive[F[_]: Async] private (queue: Queue[F, Mail[F]]) extends EmailService[F]:
   override def sendEmail(email: Mail[F]): F[Unit] =
     queue.offer(email)
   end sendEmail

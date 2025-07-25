@@ -20,9 +20,11 @@ object Utils:
           ),
         )
     }
+  end parseLine
 
   private def mkException(field: String): IllegalArgumentException =
     IllegalArgumentException(s"Missing or invalid field '$field'")
+  end mkException
 
   inline private val HostKey = "Host"
   inline private val PortKey = "Port"
@@ -55,24 +57,31 @@ object Utils:
       .flatMap(mapperFn)
       .filter(filterFn)
       .liftTo[F](mkException(key))
+  end parseKey
 
   private def parseHost[F[_]: Async](configMap: Map[String, String]): F[String] =
     parseKey(configMap, HostKey, Some.apply, _.nonEmpty)
+  end parseHost
 
   private def parsePort[F[_]: Async](configMap: Map[String, String]): F[Int] =
     parseKey(configMap, PortKey, _.toIntOption, isValidPort)
+  end parsePort
 
   private def parseUser[F[_]: Async](configMap: Map[String, String]): F[String] =
     parseKey(configMap, UserKey, Some.apply, _.nonEmpty)
+  end parseUser
 
   private def parsePassword[F[_]: Async](configMap: Map[String, String]): F[String] =
     parseKey(configMap, PasswordKey, Some.apply, _.nonEmpty)
+  end parsePassword
 
   private def parseServerHostIP[F[_]: Async](configMap: Map[String, String]): F[String] =
     parseKey(configMap, ServerHostIP, Some.apply, _.nonEmpty)
+  end parseServerHostIP
 
   private def parseServerHostPort[F[_]: Async](configMap: Map[String, String]): F[Int] =
     parseKey(configMap, ServerHostPort, _.toIntOption, isValidPort)
+  end parseServerHostPort
 
   private def parseDatabaseConfig[F[_]: Async](config: String): F[DatabaseConfig] =
     for {
@@ -90,23 +99,29 @@ object Utils:
       serverHostIP <- parseServerHostIP(configMap)
       serverHostPort <- parseServerHostPort(configMap)
     } yield DatabaseConfig(host, port, user, password, serverHostIP, serverHostPort)
+  end parseDatabaseConfig
 
   def readDbConfig[F[_]: Async as async](path: String): Resource[F, DatabaseConfig] =
     Resource
       .fromAutoCloseable(async.blocking(Source.fromFile(Paths.get(path).toFile)))
       .evalMap(source => async.blocking(source.mkString) >>= parseDatabaseConfig[F])
+  end readDbConfig
 
   def logi[F[_]: Logger as logger](fiber: String, s: String): F[Unit] =
     logger.info(s"$fiber :: $s")
+  end logi
 
   def loge[F[_]: Logger as logger](e: Throwable, fiber: String, s: String): F[Unit] =
     logger.error(e)(s"$fiber :: $s")
+  end loge
 
   def logi[F[_]: Logger as logger](fiber: String, uuid: String, s: String): F[Unit] =
     logger.info(s"$fiber [$uuid] :: $s")
+  end logi
 
   def loge[F[_]: Logger as logger](e: Throwable, fiber: String, uuid: String, s: String): F[Unit] =
     logger.error(e)(s"$fiber [$uuid] :: $s")
+  end loge
 
   def const1[R, A](r: R): A => R = _ => r
   def const2[R, A, B](r: R): (A, B) => R = (_, _) => r
@@ -118,3 +133,4 @@ object Utils:
   def const8[R, A, B, C, D, E, F, G, H](r: R): (A, B, C, D, E, F, G, H) => R = (_, _, _, _, _, _, _, _) => r
   def const9[R, A, B, C, D, E, F, G, H, I](r: R): (A, B, C, D, E, F, G, H, I) => R = (_, _, _, _, _, _, _, _, _) => r
   def const10[R, A, B, C, D, E, F, G, H, I, J](r: R): (A, B, C, D, E, F, G, H, I, J) => R = (_, _, _, _, _, _, _, _, _, _) => r
+end Utils

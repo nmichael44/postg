@@ -69,3 +69,4 @@ object SquareLand:
     println(s"i = $i, j = $j, siz = $siz\n")
     printArray(v)
     println()
+end SquareLand

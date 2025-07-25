@@ -35,3 +35,4 @@ object Refs:
     Slf4jLogger.create[IO].flatMap { implicit logger =>
       doCalc[IO](11).as(ExitCode.Success)
     }
+end Refs

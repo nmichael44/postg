@@ -62,3 +62,4 @@ object Switches:
     case O3
     case O4
   }
+end Switches
