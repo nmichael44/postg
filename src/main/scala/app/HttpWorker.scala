@@ -10,6 +10,7 @@ import scala.util.control.NoStackTrace
 
 import app.services.{AuthService, EmailService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerStateUpdateService}
 import app.services.MovieRepositoryUtils.DBError
+import app.AppConfig.AppConfig
 import app.ImplicitConversions.*
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult, LoginRequestError}
 import app.MemCaches.MemCache
@@ -24,17 +25,17 @@ object HttpWorker:
       val uuid: String,
   )
 
-  private final class JobExecutor[F[_]: { Async as async, Logger }](
-      mr: MovieRepositoryService[F],
-      apiClient: ExternalApiClientService[F],
-      fileSystemService: FileSystemService[F],
-      serverStateUpdateService: ServerStateUpdateService[F],
-      passwordHasherService: PasswordHasher[F],
-      authService: AuthService[F],
-      emailService: EmailService[F],
-      memCaches: MemCaches[F],
-      val uuidScope: TraceIdScope[F, Option[String]],
-  ):
+  private final class JobExecutor[F[_]: { Async as async, Logger }](deps: AppDependencies[F]):
+    private val mr: MovieRepositoryService[F] = deps.movieRepositoryService
+    private val apiClient: ExternalApiClientService[F] = deps.externalApiClientService
+    private val fileSystemService: FileSystemService[F] = deps.fileSystemService
+    private val serverStateUpdateService: ServerStateUpdateService[F] = deps.serverStateUpdateService
+    private val passwordHasherService: PasswordHasher[F] = deps.passwordHasherService
+    private val authService: AuthService[F] = deps.authService
+    private val emailService: EmailService[F] = deps.emailService
+    private val memCaches: MemCaches[F] = deps.memCaches
+    val uuidScope: TraceIdScope[F, Option[String]] = deps.uuidScope
+
     private val directorMemCacheOpt: Option[MemCache[F, Long, MovieDbModel.Director]] = memCaches.directorCacheOpt
     private val actorMemCacheOpt: Option[MemCache[F, Long, MovieDbModel.Actor]] = memCaches.actorCacheOpt
     private val movieMemCacheOpt: Option[MemCache[F, Long, MovieDbModel.Movie]] = memCaches.movieCacheOpt
@@ -353,24 +354,11 @@ object HttpWorker:
     processSafely.foreverM
   end createWorker
 
-  def createWorkers[F[_]: { Async, Logger }](deps: AppDependencies[F]): F[Unit] =
-    val serverState = deps.serverState
+  def createWorkers[F[_]: { Async, Logger }](appConfig: AppConfig, deps: AppDependencies[F]): F[Unit] =
+    val jobExecutor: JobExecutor[F] = JobExecutor(deps)
 
-    val jobExecutor: JobExecutor[F] =
-      JobExecutor(
-        deps.movieRepositoryService,
-        deps.externalApiClientService,
-        deps.fileSystemService,
-        deps.serverStateUpdateService,
-        deps.passwordHasherService,
-        deps.authService,
-        deps.emailService,
-        deps.memCaches,
-        deps.uuidScope,
-      )
-
-    val numberOfWorkers = deps.appConfig.getBackendServerConfig.getNumberOfWorkers
-    val worker = createWorker(serverState.jobQueue, jobExecutor)
+    val numberOfWorkers = appConfig.getBackendServerConfig.getNumberOfWorkers
+    val worker = createWorker(deps.serverState.jobQueue, jobExecutor)
     val supervisor = deps.supervisor
 
     Vector

@@ -10,7 +10,7 @@ object Main extends IOApp:
 
   override def run(args: List[String]): IO[ExitCode] = program
 
-//  private def consumer(d: Deferred[IO, Int]): IO[Int] = d.get
+  //  private def consumer(d: Deferred[IO, Int]): IO[Int] = d.get
 //
 //  private val program: IO[ExitCode] = {
 //    val x = UUIDGenerator.create[IO]

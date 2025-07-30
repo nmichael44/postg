@@ -6,9 +6,7 @@ import cats.effect.kernel.{Async, Resource}
 import cats.effect.std.{Queue, Supervisor}
 import cats.effect.std.Env
 import cats.syntax.all.*
-import cats.Applicative
 
-import scala.annotation.unused
 import scala.concurrent.duration.*
 
 import app.permissions.Permissions.{CompiledPermissionAlgebra, Permission, PermissionAlgebra}
@@ -20,6 +18,7 @@ import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLog
 import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, SendEmailResult}
 import app.MemCaches.MemCache
 import app.MovieDbModel.DirectorPath
+import app.Renderer
 import app.Utils as U
 import com.comcast.ip4s.{Ipv4Address, Port}
 import fs2.io.net.tls.*
@@ -37,7 +36,7 @@ import org.http4s.dsl.io.*
 import org.http4s.dsl.Http4sDsl
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.headers.{`WWW-Authenticate`, Authorization}
+import org.http4s.headers.Authorization
 import org.http4s.implicits.*
 import org.http4s.server.{AuthMiddleware, Router}
 import org.typelevel.ci.CIString
@@ -45,13 +44,13 @@ import org.typelevel.log4cats.{Logger, LoggerName}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import pureconfig.ConfigSource
 import services.{AuthService, EmailService, ExternalApiClientService, FileSystemService, MovieRepositoryService, ServerState, ServerStateUpdateService}
-import MovieApp.{AppDependencies, Render, WebServiceResult}
+import MovieApp.AppDependencies
 import MovieDbModel.AuthenticatedUser
 
 private final class MovieApp[F[_]: { Async as async, Logger as logger }] private (
     deps: AppDependencies[F],
     dsl: Http4sDsl[F],
-    render: Render[F],
+    renderer: Renderer[F],
 ):
   private val FiberName = "http4sFiber"
 
@@ -67,6 +66,30 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
     U.logi(FiberName, uuid, s)
   end logi
 
+  private def badRequestResult(errMsg: String): WebServiceResult =
+    WebServiceResult.BadRequestRes(errMsg)
+
+  private def badRequestResultF(errMsg: String): F[WebServiceResult] =
+    async.pure(badRequestResult(errMsg))
+
+  private def okResult(json: Json): WebServiceResult =
+    WebServiceResult.OkJsonRes(json)
+
+  private def okResult[A](a: A)(using encoder: Encoder[A]): WebServiceResult =
+    okResult(a.asJson)
+
+  private def unauthorizedResult(errMsg: String): WebServiceResult =
+    WebServiceResult.UnauthorizedRes(errMsg)
+
+  private def notFoundResult(errMsg: String): WebServiceResult =
+    WebServiceResult.NotFoundRes(errMsg)
+
+  private def conflictResult(errMsg: String): WebServiceResult =
+    WebServiceResult.ConflictRes(errMsg)
+
+  private def internalServerErrorResult(): WebServiceResult =
+    WebServiceResult.InternalServerErrorRes()
+
   private val DeferredF: F[Deferred[F, Either[Throwable, JobResult]]] =
     Deferred[F, Either[Throwable, JobResult]]
 
@@ -77,9 +100,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
   private def getUUIDForRequest(req: Request[F], uuidGen: UUIDGenerator[F]): F[String] =
     RequestHeaderUtils
       .getXRequestId(req)
-      .fold(logNotFound *> uuidGen.generateUUIDAsString) { headerUuid =>
-        logFound *> async.pure(headerUuid)
-      }
+      .fold(logNotFound *> uuidGen.generateUUIDAsString)(logFound.as)
   end getUUIDForRequest
 
   extension (user: AuthenticatedUser)
@@ -91,7 +112,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
     val userId = user.userId
 
     logi(uuid, s"Authorization failure for user with id: $userId")
-      .as(WebServiceResult.UnauthorizedRes(s"User ($userId) is not authorized to execute job '$jobName'."))
+      .as(unauthorizedResult(s"User ($userId) is not authorized to execute job '$jobName'."))
   end reportUnauthorizedUser
 
   private def jobHandler[T <: JobResult](
@@ -154,8 +175,15 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       resEither: Either[Throwable, JobResult],
       f: T => WebServiceResult,
   ): WebServiceResult =
-    resEither.fold(_ => WebServiceResult.InternalServerErrorRes(), jr => f(jr.asInstanceOf[T]))
+    resEither.fold(_ => internalServerErrorResult(), jr => f(jr.asInstanceOf[T]))
   end mkResponse
+
+  private def ensureOnlyAllowedParams(allowedParams: Set[String], req: Request[F]): Option[F[WebServiceResult]] =
+    val providedParams = req.multiParams.keySet
+    val extraParams = providedParams -- allowedParams
+
+    Option.when(extraParams.nonEmpty)(badRequestResultF(s"Extra params found in quest: ${extraParams.mkString(", ")}."))
+  end ensureOnlyAllowedParams
 
   private val GetDirectorDetailsByNamePermissionsAlg: CompiledPermissionAlgebra =
     PermissionAlgebra
@@ -173,8 +201,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
       directorPath: DirectorPath,
   ): F[WebServiceResult] =
-    MovieApp
-      .ensureOnlyAllowedParams(allowedParamsForGetDirectors, ctxReq.req)
+    ensureOnlyAllowedParams(allowedParamsForGetDirectors, ctxReq.req)
       .getOrElse {
         jobHandler[DirectorsDetailsByNameResult](
           ctxReq,
@@ -182,12 +209,12 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
           serverState,
           uuidGen,
           GetDirectorsDetailsByName(directorPath.firstName, directorPath.lastName),
-          dirs => WebServiceResult.OkJsonRes(dirs.asJson),
+          okResult,
         )
       }
   end getDirectorsDetailsByName
 
-  private val DirectorNotFound: WebServiceResult = WebServiceResult.NotFoundRes("Director not found")
+  private val DirectorNotFound: WebServiceResult = notFoundResult("Director not found")
 
   private val GetDirectorDetailsPermissionsAlg: CompiledPermissionAlgebra =
     PermissionAlgebra
@@ -211,11 +238,11 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       serverState,
       uuidGen,
       GetDirectorDetails(directorId),
-      _.director.fold(DirectorNotFound)(dir => WebServiceResult.OkJsonRes(dir.asJson)),
+      _.director.fold(DirectorNotFound)(okResult),
     )
   end getDirectorDetails
 
-  private val ActorNotFound: WebServiceResult = WebServiceResult.NotFoundRes("Actor not found")
+  private val ActorNotFound: WebServiceResult = notFoundResult("Actor not found")
 
   private val GetActorDetailsPermissionsAlg: CompiledPermissionAlgebra =
     PermissionAlgebra
@@ -239,7 +266,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       serverState,
       uuidGen,
       GetActorDetails(actorId),
-      _.actor.fold(ActorNotFound)(act => WebServiceResult.OkJsonRes(act.asJson)),
+      _.actor.fold(ActorNotFound)(okResult),
     )
   end getActorDetails
 
@@ -282,11 +309,11 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       serverState,
       uuidGen,
       GetMoviesByDirector(directorId),
-      mvs => WebServiceResult.OkJsonRes(mvs.asJson),
+      okResult,
     )
   end getMoviesByDirector
 
-  private val MovieNotFound: WebServiceResult = WebServiceResult.NotFoundRes("Movie not found")
+  private val MovieNotFound: WebServiceResult = notFoundResult("Movie not found")
 
   private val GetMovieDetailsPermissionsAlg: CompiledPermissionAlgebra =
     PermissionAlgebra
@@ -310,7 +337,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       serverState,
       uuidGen,
       GetMovie(movieId),
-      _.movie.fold(MovieNotFound)(mv => WebServiceResult.OkJsonRes(mv.asJson)),
+      _.movie.fold(MovieNotFound)(okResult),
     )
   end getMovie
 
@@ -326,9 +353,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       serverState,
       uuidGen,
       GetMovieWithCounting(movieId),
-      _.movie.fold(WebServiceResult.BadRequestRes(s"Movie id: '$movieId' not found!"))(mv =>
-        WebServiceResult.OkJsonRes(mv.asJson),
-      ),
+      _.movie.fold(badRequestResult(s"Movie id: '$movieId' not found!"))(okResult),
     )
   end getMovieWithCounting
 
@@ -355,7 +380,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       serverState,
       uuidGen,
       CreateMovie(title, year),
-      cmr => WebServiceResult.OkJsonRes(cmr.asJson),
+      okResult,
     )
   end createMovie
 
@@ -371,7 +396,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
   ): F[WebServiceResult] =
     ctxReq.req.as[MovieDbModel.UserDetails].attempt >>= {
-      case Left(_) => async.pure(WebServiceResult.BadRequestRes("Invalid request body"))
+      case Left(_) => badRequestResultF("Invalid request body")
       case Right(userDetails) =>
         jobHandler[CreateSystemUserResult](
           ctxReq,
@@ -382,12 +407,12 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
           { case CreateSystemUserResult(res) =>
             res match {
               case Left(CreateSystemUserError.DuplicateLoginNameInDB(loginName)) =>
-                WebServiceResult.ConflictRes(s"The given loginName '$loginName' was already present in the database.")
+                conflictResult(s"The given loginName '$loginName' was already present in the database.")
               case Left(CreateSystemUserError.BadPassword(errorList)) =>
                 val errorStr = errorList.toVector.mkString("\"", "\", \"", "\"")
-                WebServiceResult.BadRequestRes(s"Invalid password. Errors: [$errorStr]")
+                badRequestResult(s"Invalid password. Errors: [$errorStr]")
               case Right(userId) =>
-                WebServiceResult.OkJsonRes(Json.obj("userId" -> userId.asJson))
+                okResult(Json.obj("userId" -> userId.asJson))
             }
           },
         )
@@ -411,8 +436,8 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       FetchSystemUserByLoginName(loginName),
       { case FetchSystemUserByLoginNameResult(res) =>
         res match {
-          case Left(_) => WebServiceResult.NotFoundRes(s"The given loginName '$loginName' was not found.")
-          case Right(r) => WebServiceResult.OkJsonRes(r.asJson)
+          case Left(_) => notFoundResult(s"The given loginName '$loginName' was not found.")
+          case Right(r) => okResult(r)
         }
       },
     )
@@ -433,10 +458,10 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       { case FetchSystemUserByUserIdResult(res) =>
         res match {
           case Left(FetchSystemUserError.NotFound) =>
-            WebServiceResult.NotFoundRes(s"The given userId '$userIdStr' was not found.")
+            notFoundResult(s"The given userId '$userIdStr' was not found.")
           case Left(FetchSystemUserError.BadInput) =>
-            WebServiceResult.BadRequestRes(s"The given userId '$userIdStr' was not a valid integer.")
-          case Right(r) => WebServiceResult.OkJsonRes(r.asJson)
+            badRequestResult(s"The given userId '$userIdStr' was not a valid integer.")
+          case Right(r) => okResult(r)
         }
       },
     )
@@ -449,7 +474,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
     PermissionAlgebra.Has(Permission.CanSendEmail).compile
 
   private val BadRequestEmail: F[WebServiceResult] =
-    async.pure(WebServiceResult.BadRequestRes("Invalid request body"))
+    badRequestResultF("Invalid request body")
 
   private def sendEmail(
       serverState: ServerState[F],
@@ -467,13 +492,16 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
           SendEmail(msg),
           { case SendEmailResult(res) =>
             res match {
-              case Left(errors) => WebServiceResult.BadRequestRes(s"Errors: ${errors.toString}")
-              case Right(str) => WebServiceResult.OkJsonRes(Json.obj("status" -> str.asJson))
+              case Left(errors) => badRequestResult(s"Errors: ${errors.toString}")
+              case Right(str) => okResult(Json.obj("status" -> str.asJson))
             }
           },
         )
     }
   end sendEmail
+
+  private val InvalidRequestBody: F[WebServiceResult] = badRequestResultF("Invalid request body")
+  private val InvalidLoginNamePassword: WebServiceResult = unauthorizedResult("Invalid loginName/password specified.")
 
   private def processLoginRequest(
       serverState: ServerState[F],
@@ -481,7 +509,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
   ): F[WebServiceResult] =
     req.as[MovieDbModel.UserDetails].attempt >>= {
-      case Left(_) => async.pure(WebServiceResult.BadRequestRes("Invalid request body"))
+      case Left(_) => InvalidRequestBody
       case Right(userDetails) =>
         jobHandler[LoginRequestResult](
           req,
@@ -490,8 +518,8 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
           LoginRequest(userDetails),
           { case LoginRequestResult(res) =>
             res match {
-              case Left(_) => WebServiceResult.UnauthorizedRes("Invalid loginName/password specified.")
-              case Right(token) => WebServiceResult.OkJsonRes(Json.obj("token" -> token.asJson))
+              case Left(_) => InvalidLoginNamePassword
+              case Right(token) => okResult(Json.obj("token" -> token.asJson))
             }
           },
         )
@@ -566,11 +594,11 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
     }
 
   private val publicRoutesPath: (String, HttpRoutes[F]) =
-    "/" -> HttpRoutes.of[F](publicRoutes.andThen(_ >>= render.apply))
+    "/" -> HttpRoutes.of[F](publicRoutes.andThen(_ >>= renderer.apply))
 
   private val apiRoutesPath: (String, HttpRoutes[F]) =
     val authRoutes: AuthedRoutes[AuthenticatedUser, F] =
-      AuthedRoutes.of[AuthenticatedUser, F](authedRoutes.andThen(_ >>= render.apply))
+      AuthedRoutes.of[AuthenticatedUser, F](authedRoutes.andThen(_ >>= renderer.apply))
 
     "/api" -> createAuthMiddleware(deps.authService)(authRoutes)
 
@@ -590,22 +618,6 @@ object MovieApp:
       case (_, None) => async.raiseError(AssertionError(s"Illegal ServerHostPort: '$port'."))
     }
   end getServerHostIPPort
-
-  private def ensureOnlyAllowedParams[F[_]: Applicative as app](
-      allowedParams: Set[String],
-      req: Request[F],
-  ): Option[F[WebServiceResult]] =
-    val providedParams = req.multiParams.keySet
-    val extraParams = providedParams -- allowedParams
-
-    Option.when(extraParams.nonEmpty)(
-      app.pure(
-        WebServiceResult.BadRequestRes(
-          s"Extra params found in quest: ${extraParams.mkString(", ")}.",
-        ),
-      ),
-    )
-  end ensureOnlyAllowedParams
 
   private def createCache[F[_]: { Temporal, Logger }, T](
       cacheName: String,
@@ -730,13 +742,16 @@ object MovieApp:
 
   private def createHttpApp[F[_]: { Async, Logger }](deps: AppDependencies[F]): HttpApp[F] =
     val dsl: Http4sDsl[F] = Http4sDsl[F]
-    val render: Render[F] = Render(dsl)
+    val renderer: Renderer[F] = Renderer(dsl)
 
-    MovieApp(deps, dsl, render).allRoutes
+    MovieApp(deps, dsl, renderer).allRoutes
   end createHttpApp
 
-  private def createServer[F[_]: { Async as async, Network, Logger }](deps: AppDependencies[F]): F[ExitCode] =
-    val serverConnectionConfig = deps.appConfig.getServerConnectionConfig
+  private def createServer[F[_]: { Async as async, Network, Logger }](
+      appConfig: AppConfig,
+      deps: AppDependencies[F],
+  ): F[ExitCode] =
+    val serverConnectionConfig = appConfig.getServerConnectionConfig
     val keyStoreFile = serverConnectionConfig.getKeystoreFile
     val keyStorePassword = serverConnectionConfig.getKeystorePassword
     val httpApp = createHttpApp[F](deps)
@@ -753,7 +768,6 @@ object MovieApp:
   inline private val MaxHttpClientRedirects = 5
 
   final class AppDependencies[F[_]](
-      val appConfig: AppConfig,
       val serverState: ServerState[F],
       val memCaches: MemCaches[F],
       val supervisor: Supervisor[F],
@@ -774,91 +788,16 @@ object MovieApp:
       movieRequestCounts: Ref[F, Map[Long, Int]],
       jobQueue: Queue[F, HttpWorker.Job[F]],
   ) extends ServerState[F]
+  end ServerStateLive
 
   private[app] object ServerStateLive:
     def create[F[_]: Async as async](backendServer: BackendServerConfig): F[ServerState[F]] =
       val boundedQueueCapacity = backendServer.getBoundedQueueCapacity
-      for {
-        movieReqCounts <- Ref.of[F, Map[Long, Int]](Map.empty)
-        jobQueue <- Queue.bounded[F, HttpWorker.Job[F]](boundedQueueCapacity)
-      } yield ServerStateLive[F](movieReqCounts, jobQueue)
+
+      (Ref.of[F, Map[Long, Int]](Map.empty), Queue.bounded[F, HttpWorker.Job[F]](boundedQueueCapacity))
+        .mapN((movieReqCounts, jobQueue) => ServerStateLive[F](movieReqCounts, jobQueue))
     end create
   end ServerStateLive
-
-  private[app] enum WebServiceResult:
-    case OkJsonRes(json: Json)
-    case NotFoundRes(s: String)
-    case ConflictRes(s: String)
-    case BadRequestRes(e: String)
-    case UnauthorizedRes(e: String)
-    case InternalServerErrorRes()
-  end WebServiceResult
-
-  private[app] final class Render[F[_]: Async as async](dsl: Http4sDsl[F]):
-    import dsl.*
-    import org.http4s.circe.CirceEntityEncoder.*
-    import WebServiceResult.*
-
-    private val ErrorChallenge: Challenge = Challenge(
-      scheme = "Bearer",
-      realm = "neo_token_service",
-      params = Map("error" -> "invalid_grant", "error_description" -> "Invalid username or password"),
-    )
-
-    private final case class ApiError(message: String, errorCode: String, timestamp: java.time.Instant)
-
-    private object ApiError:
-      def apply(message: String, errorCode: String): F[ApiError] =
-        TimeUtils.nowInstant.map(ApiError(message, errorCode, _))
-      end apply
-    end ApiError
-
-    private def okJsonToResponse(wsr: WebServiceResult): F[Response[F]] =
-      Ok(wsr.asInstanceOf[OkJsonRes].json)
-    end okJsonToResponse
-
-    private def noFoundToResponse(wsr: WebServiceResult): F[Response[F]] =
-      ApiError(wsr.asInstanceOf[NotFoundRes].s, "NOTFOUND") >>= (apiErr => NotFound(apiErr))
-    end noFoundToResponse
-
-    private def conflictToResponse(wsr: WebServiceResult): F[Response[F]] =
-      ApiError(wsr.asInstanceOf[ConflictRes].s, "CONFLICT") >>= (apiErr => Conflict(apiErr))
-    end conflictToResponse
-
-    private def badRequestToResponse(wsr: WebServiceResult): F[Response[F]] =
-      ApiError(wsr.asInstanceOf[BadRequestRes].e, "BADREQUEST") >>= (apiErr => BadRequest(apiErr))
-    end badRequestToResponse
-
-    private def unauthorizedToResponse(wsr: WebServiceResult): F[Response[F]] =
-      ApiError(wsr.asInstanceOf[UnauthorizedRes].e, "UNAUTHORIZED") >>= { apiErr =>
-        Unauthorized(`WWW-Authenticate`(ErrorChallenge), apiErr)
-      }
-    end unauthorizedToResponse
-
-    private def internalServerErrorToResponse(@unused wsr: WebServiceResult): F[Response[F]] =
-      InternalServerError()
-    end internalServerErrorToResponse
-
-    private val ResultHandlerMap: Map[Class[? <: WebServiceResult], WebServiceResult => F[Response[F]]] = Map(
-      classOf[OkJsonRes]              -> okJsonToResponse,
-      classOf[NotFoundRes]            -> noFoundToResponse,
-      classOf[ConflictRes]            -> conflictToResponse,
-      classOf[BadRequestRes]          -> badRequestToResponse,
-      classOf[UnauthorizedRes]        -> unauthorizedToResponse,
-      classOf[InternalServerErrorRes] -> internalServerErrorToResponse,
-    )
-
-    private def notImplemented(c: Class[?]): Exception =
-      Exception(s"Renderer not registered (in ResultHandlerMap) for class '$c'.")
-
-    def apply(wsr: WebServiceResult): F[Response[F]] =
-      val c = wsr.getClass
-      ResultHandlerMap
-        .get(c)
-        .map(_(wsr))
-        .getOrElse(async.raiseError(notImplemented(c)))
-    end apply
-  end Render
 
   private def createLogger[F[_]: Async as async]: F[Logger[F]] =
     val movieAppLoggerName = LoggerName("MovieAppLogger")
@@ -874,7 +813,7 @@ object MovieApp:
     implicit val env: Env[F] = IO.envForIO // env is actually used -- intellij claims it is not, but it's a bug in intellij
 
     createLogger[F] >>= { implicit logger =>
-      val appDeps: Resource[F, AppDependencies[F]] = for {
+      val appDeps: Resource[F, (AppConfig, AppDependencies[F])] = for {
         appConfig <- createConfigResource[F]
         memCaches <- createMemCaches[F](appConfig.getMemCacheConfig)
         serverState <- Resource.eval[F, ServerState[F]](ServerStateLive.create[F](appConfig.getBackendServerConfig))
@@ -892,23 +831,29 @@ object MovieApp:
         val passwordHasherService: PasswordHasher[F] = PasswordHasherLive.create[F]
         val authService: AuthService[F] = AuthServiceLive.create[F](appConfig.getAuthConfig, java.time.Clock.systemUTC())
 
-        AppDependencies(
+        (
           appConfig,
-          serverState,
-          memCaches,
-          supervisor,
-          uuidGen,
-          uuidScope,
-          externalApiClientService,
-          movieRepositoryService,
-          fileSystemService,
-          serverStateUpdateService,
-          passwordHasherService,
-          authService,
-          emailService,
+          AppDependencies(
+            serverState,
+            memCaches,
+            supervisor,
+            uuidGen,
+            uuidScope,
+            externalApiClientService,
+            movieRepositoryService,
+            fileSystemService,
+            serverStateUpdateService,
+            passwordHasherService,
+            authService,
+            emailService,
+          ),
         )
       }
 
-      appDeps.use(deps => HttpWorker.createWorkers[F](deps) *> createServer[F](deps))
+      appDeps.use { (appConfig, deps) =>
+        HttpWorker.createWorkers[F](appConfig, deps) *>
+          createServer[F](appConfig, deps)
+      }
     }
+  end run
 end MovieApp
