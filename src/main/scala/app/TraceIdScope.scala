@@ -6,6 +6,7 @@ import cats.syntax.functor.*
 trait TraceIdScope[F[_], A]:
   def get: F[A]
   def scope(a: A): Resource[F, Unit]
+end TraceIdScope
 
 object TraceIdScope:
   def fromIOLocal[A](a: A): IO[TraceIdScope[IO, A]] =
@@ -16,4 +17,5 @@ object TraceIdScope:
           Resource.make(local.getAndSet(a))(previous => local.set(previous)).void
       }
     }
+  end fromIOLocal
 end TraceIdScope

@@ -14,7 +14,7 @@ import app.serviceslive.{AuthServiceLive, EmailServiceAsync2Live, ExternalApiCli
 import app.AppConfig.{ActorMemCacheConfig, AppConfig, BackendServerConfig, DirectorMemCacheConfig, MemCacheConfig, MovieMemCacheConfig, ServerConnectionConfig}
 import app.ImplicitConversions.*
 import app.JobSpecs.{CreateSystemUserError, FetchSystemUserError, JobKind, JobResult}
-import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovie, GetMovieWithCounting, GetMoviesByDirector, LoginRequest, SendEmail}
+import app.JobSpecs.JobKind.{CreateMovie, CreateSystemUser, FetchSystemUserByLoginName, FetchSystemUserByUserId, GetActorDetails, GetDirectorDetails, GetDirectorsDetailsByName, GetMovieDetails, GetMovieWithCounting, GetMoviesByDirector, LoginRequest, SendEmail}
 import app.JobSpecs.JobResult.{ActorDetailsResult, CreateMovieResult, CreateSystemUserResult, DirectorDetailsResult, DirectorsDetailsByNameResult, FetchSystemUserByLoginNameResult, FetchSystemUserByUserIdResult, LoginRequestResult, MovieDetailsResult, MovieWithCountingResult, MoviesByDirectorResult, SendEmailResult}
 import app.MemCaches.MemCache
 import app.MovieDbModel.DirectorPath
@@ -336,7 +336,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       GetMovieDetailsPermissionsAlg,
       serverState,
       uuidGen,
-      GetMovie(movieId),
+      GetMovieDetails(movieId),
       _.movie.fold(MovieNotFound)(okResult),
     )
   end getMovie

@@ -146,8 +146,8 @@ object HttpWorker:
 
     private val MovieCachingDuration: FiniteDuration = 2.minutes
 
-    private def getMovie(jk: JobKind): F[JobResult] =
-      val j = jk.asInstanceOf[JobKind.GetMovie]
+    private def getMovieDetails(jk: JobKind): F[JobResult] =
+      val j = jk.asInstanceOf[JobKind.GetMovieDetails]
       getDetailsWithCache(
         "Movie",
         j.movieId,
@@ -156,13 +156,7 @@ object HttpWorker:
         mr.getMovieDetails,
         JobResult.MovieDetailsResult.apply,
       )
-
-      val movieId = j.movieId
-      for {
-        _ <- logi(s"Fetching movie details for id: $movieId")
-        movieDetailsMap <- mr.getMovieDetails(NonEmptyVector.one(movieId))
-      } yield JobResult.MovieDetailsResult(movieDetailsMap.get(movieId))
-    end getMovie
+    end getMovieDetails
 
     private def getMovieWithCounting(jk: JobKind): F[JobResult] =
       val j = jk.asInstanceOf[JobKind.GetMovieWithCounting]
@@ -296,7 +290,7 @@ object HttpWorker:
       classOf[JobKind.GetDirectorDetails]         -> getDirectorDetails,
       classOf[JobKind.GetActorDetails]            -> getActorDetails,
       classOf[JobKind.GetMoviesByDirector]        -> getMoviesByDirector,
-      classOf[JobKind.GetMovie]                   -> getMovie,
+      classOf[JobKind.GetMovieDetails]            -> getMovieDetails,
       classOf[JobKind.GetMovieWithCounting]       -> getMovieWithCounting,
       classOf[JobKind.CreateMovie]                -> createMovie,
       classOf[JobKind.CreateSystemUser]           -> createSystemUser,

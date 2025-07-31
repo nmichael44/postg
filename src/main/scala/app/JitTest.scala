@@ -26,3 +26,4 @@ object JitTest:
     val y3 = x3 * 7
 
     y0 + y1 + y2 + y3
+end JitTest

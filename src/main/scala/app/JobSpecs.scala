@@ -12,7 +12,7 @@ object JobSpecs:
     case GetDirectorDetails(directorId: Long) extends JobKind("GetDirectorDetails")
     case GetActorDetails(actorId: Long) extends JobKind("GetActorDetails")
     case GetMoviesByDirector(directorId: Long) extends JobKind("GetMoviesByDirectorId")
-    case GetMovie(movieId: Long) extends JobKind("GetMovie")
+    case GetMovieDetails(movieId: Long) extends JobKind("GetMovieDetails")
     case GetMovieWithCounting(movieId: Long) extends JobKind("GetMovieWithCounting")
     case CreateMovie(title: String, year: Int) extends JobKind("CreateMovie")
     case CreateSystemUser(userDetails: UserDetails) extends JobKind("CreateSystemUser")
@@ -50,3 +50,4 @@ object JobSpecs:
     case LoginRequestResult(res: Either[LoginRequestError, String])
     case SendEmailResult(res: Either[NonEmptyVector[String], String])
   end JobResult
+end JobSpecs
