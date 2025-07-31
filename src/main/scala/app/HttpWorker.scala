@@ -240,9 +240,7 @@ object HttpWorker:
 
       for {
         _ <- logFetchingSystemUserByUserId
-        (res: Either[FetchSystemUserError, MovieDbModel.UserDetailsInDb]) <- userIdStr.toLongOption.fold(
-          async.pure(Left(FetchSystemUserError.BadInput)),
-        ) { userId =>
+        res <- userIdStr.toLongOption.fold(async.pure(Left(FetchSystemUserError.BadInput))) { userId =>
           mr.fetchSystemUserByUserId(userId).map(_.toRight(FetchSystemUserError.NotFound))
         }
       } yield JobResult.FetchSystemUserByUserIdResult(res)
