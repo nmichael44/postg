@@ -15,6 +15,7 @@ private final class PasswordHasherLive[F[_]: Sync as sync] private extends Passw
     argon2Type = Argon2.ID,
     version = 19,
   )
+  end argon2Function
 
   inline private final val LengthOfSaltValue = 16
 
