@@ -34,9 +34,9 @@ final class Renderer[F[_]: Async as async](dsl: Http4sDsl[F]):
     Ok(wsr.asInstanceOf[OkJsonRes].json)
   end okJsonToResponse
 
-  private def noFoundToResponse(wsr: WebServiceResult): F[Response[F]] =
+  private def notFoundToResponse(wsr: WebServiceResult): F[Response[F]] =
     ApiError(wsr.asInstanceOf[NotFoundRes].s, "NOTFOUND") >>= (apiErr => NotFound(apiErr))
-  end noFoundToResponse
+  end notFoundToResponse
 
   private def conflictToResponse(wsr: WebServiceResult): F[Response[F]] =
     ApiError(wsr.asInstanceOf[ConflictRes].s, "CONFLICT") >>= (apiErr => Conflict(apiErr))
@@ -58,7 +58,7 @@ final class Renderer[F[_]: Async as async](dsl: Http4sDsl[F]):
 
   private val ResultHandlerMap: Map[Class[? <: WebServiceResult], WebServiceResult => F[Response[F]]] = Map(
     classOf[OkJsonRes]              -> okJsonToResponse,
-    classOf[NotFoundRes]            -> noFoundToResponse,
+    classOf[NotFoundRes]            -> notFoundToResponse,
     classOf[ConflictRes]            -> conflictToResponse,
     classOf[BadRequestRes]          -> badRequestToResponse,
     classOf[UnauthorizedRes]        -> unauthorizedToResponse,
