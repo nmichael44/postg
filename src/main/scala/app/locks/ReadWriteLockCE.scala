@@ -30,6 +30,7 @@ object ReadWriteLockCE:
     def isRead: Boolean =
       this.isInstanceOf[Read[?]]
     end isRead
+  end Request
 
   private case class State[F[_]](
       activeReaders: Int,
