@@ -115,7 +115,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       .as(unauthorizedResult(s"User ($userId) is not authorized to execute job '$jobName'."))
   end reportUnauthorizedUser
 
-  private def jobHandler[T <: JobResult](
+  private def jobHandlerWithAuth[T <: JobResult](
       ctxReq: ContextRequest[F, AuthenticatedUser],
       jobPermissionAlgebra: CompiledPermissionAlgebra,
       serverState: ServerState[F],
@@ -146,9 +146,9 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
           } yield mkResponse(outcome, f)
         else reportUnauthorizedUser(user, uuid, job.shortName)
     } yield res
-  end jobHandler
+  end jobHandlerWithAuth
 
-  private def jobHandler[T <: JobResult](
+  private def jobHandlerNoAuth[T <: JobResult](
       req: Request[F],
       serverState: ServerState[F],
       uuidGen: UUIDGenerator[F],
@@ -169,7 +169,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       case Left(e) => loge(e, uuid, "Failed with exception.")
     }
   } yield mkResponse(outcome, f)
-  end jobHandler
+  end jobHandlerNoAuth
 
   private def mkResponse[T](
       resEither: Either[Throwable, JobResult],
@@ -203,7 +203,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
   ): F[WebServiceResult] =
     ensureOnlyAllowedParams(allowedParamsForGetDirectors, ctxReq.req)
       .getOrElse {
-        jobHandler[DirectorsDetailsByNameResult](
+        jobHandlerWithAuth[DirectorsDetailsByNameResult](
           ctxReq,
           GetDirectorDetailsByNamePermissionsAlg,
           serverState,
@@ -232,7 +232,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
       directorId: Long,
   ): F[WebServiceResult] =
-    jobHandler[DirectorDetailsResult](
+    jobHandlerWithAuth[DirectorDetailsResult](
       ctxReq,
       GetDirectorDetailsPermissionsAlg,
       serverState,
@@ -260,7 +260,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
       actorId: Long,
   ): F[WebServiceResult] =
-    jobHandler[ActorDetailsResult](
+    jobHandlerWithAuth[ActorDetailsResult](
       ctxReq,
       GetActorDetailsPermissionsAlg,
       serverState,
@@ -303,7 +303,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
       directorId: Long,
   ): F[WebServiceResult] =
-    jobHandler[MoviesByDirectorResult](
+    jobHandlerWithAuth[MoviesByDirectorResult](
       ctxReq,
       GetMoviesByDirectorPermissionsAlg,
       serverState,
@@ -331,7 +331,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
       movieId: Long,
   ): F[WebServiceResult] =
-    jobHandler[MovieDetailsResult](
+    jobHandlerWithAuth[MovieDetailsResult](
       ctxReq,
       GetMovieDetailsPermissionsAlg,
       serverState,
@@ -347,7 +347,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
       movieId: Long,
   ): F[WebServiceResult] =
-    jobHandler[MovieWithCountingResult](
+    jobHandlerWithAuth[MovieWithCountingResult](
       ctxReq,
       GetMovieDetailsPermissionsAlg,
       serverState,
@@ -374,7 +374,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       title: String,
       year: Int,
   ): F[WebServiceResult] =
-    jobHandler[CreateMovieResult](
+    jobHandlerWithAuth[CreateMovieResult](
       ctxReq,
       CreateMoviePermissionsAlg,
       serverState,
@@ -398,7 +398,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
     ctxReq.req.as[MovieDbModel.UserDetails].attempt >>= {
       case Left(_) => badRequestResultF("Invalid request body")
       case Right(userDetails) =>
-        jobHandler[CreateSystemUserResult](
+        jobHandlerWithAuth[CreateSystemUserResult](
           ctxReq,
           CreateSystemUserPermissionsAlg,
           serverState,
@@ -428,7 +428,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
       loginName: String,
   ): F[WebServiceResult] =
-    jobHandler[FetchSystemUserByLoginNameResult](
+    jobHandlerWithAuth[FetchSystemUserByLoginNameResult](
       ctxReq,
       FetchSystemUserPermissionsAlg,
       serverState,
@@ -449,7 +449,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
       uuidGen: UUIDGenerator[F],
       userIdStr: String,
   ): F[WebServiceResult] =
-    jobHandler[FetchSystemUserByUserIdResult](
+    jobHandlerWithAuth[FetchSystemUserByUserIdResult](
       ctxReq,
       FetchSystemUserPermissionsAlg,
       serverState,
@@ -484,7 +484,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
     ctxReq.req.as[MovieDbModel.EmailMessage].attempt >>= {
       case Left(_) => BadRequestEmail
       case Right(msg) =>
-        jobHandler[SendEmailResult](
+        jobHandlerWithAuth[SendEmailResult](
           ctxReq,
           SendEmailPermissionsAlg,
           serverState,
@@ -511,7 +511,7 @@ private final class MovieApp[F[_]: { Async as async, Logger as logger }] private
     req.as[MovieDbModel.UserDetails].attempt >>= {
       case Left(_) => InvalidRequestBody
       case Right(userDetails) =>
-        jobHandler[LoginRequestResult](
+        jobHandlerNoAuth[LoginRequestResult](
           req,
           serverState,
           uuidGen,
